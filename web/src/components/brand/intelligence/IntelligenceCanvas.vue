@@ -17,7 +17,9 @@ const {
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onPointerCancel,
   onPointerLeave,
+  onWheel,
   setMode,
 } = useIntelligenceScene(host)
 
@@ -40,7 +42,9 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
     @pointerdown="onPointerDown"
     @pointermove.capture="onPointerMove"
     @pointerup="onPointerUp"
+    @pointercancel="onPointerCancel"
     @pointerleave="onPointerLeave"
+    @wheel="onWheel"
   >
     <div ref="host" class="intel-canvas__host" />
     <IntelligenceFallback v-if="useFallback" :mode="mode" />
@@ -58,7 +62,7 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
       >{{ selected.label }}</span>
     </div>
 
-    <p v-if="!selected" class="intel-canvas__hint">拖动旋转星图 · 点击星点展开知识星团</p>
+    <p v-if="!selected" class="intel-canvas__hint">拖动旋转 · 滚轮缩放 · 点击星点聚焦</p>
   </div>
 </template>
 
@@ -67,36 +71,18 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 24rem;
   isolation: isolate;
-  overflow: hidden;
+  overflow: visible;
   cursor: grab;
-  /* 深色星云背景朝四周逐渐淡化 → 与页面浅色背景无缝衔接 */
-  background: radial-gradient(
-    ellipse 68% 74% at 50% 50%,
-    #0e323c 0%,
-    #092630 45%,
-    rgba(6, 24, 33, 0) 92%
-  );
-  /* 椭圆遮罩让画布四周（含四角）都渐隐为透明 */
-  mask-image: radial-gradient(
-    ellipse 80% 70% at 50% 50%,
-    #000 42%,
-    rgba(0, 0, 0, 0.55) 56%,
-    transparent 64%
-  );
-  -webkit-mask-image: radial-gradient(
-    ellipse 80% 70% at 50% 50%,
-    #000 42%,
-    rgba(0, 0, 0, 0.55) 56%,
-    transparent 64%
-  );
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
+
 
 .intel-canvas:active { cursor: grabbing; }
 .intel-canvas__host { position: absolute; inset: 0; }
 .intel-canvas__host :deep(canvas) { width: 100% !important; height: 100% !important; }
-.intel-canvas__labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.intel-canvas__labels { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .intel-canvas__label { position: absolute; top: 0; left: 0; color: #c8fff0; font-family: var(--font-mono); font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-shadow: 0 0 12px #31d5ad; white-space: nowrap; }
 .intel-canvas__label--hover { color: rgba(224, 250, 240, .92); font-size: .78rem; animation: label-in .24s ease-out both; }
 .intel-canvas__label--selected { color: #f0fff9; font-size: .9rem; text-shadow: 0 0 8px #47e6ba, 0 0 24px #20b58e; animation: label-in .32s ease-out both; }

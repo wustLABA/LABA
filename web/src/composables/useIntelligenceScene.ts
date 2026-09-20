@@ -39,6 +39,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
 
   let labelRaf = 0
   let pointerDown: { x: number; y: number } | null = null
+  let pointerId: number | null = null
   let isDragging = false
 
   function syncLabels() {
@@ -122,12 +123,15 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   function onPointerDown(event: PointerEvent) {
+    if (pointerId !== null) return
+    pointerId = event.pointerId
     pointerDown = { x: event.clientX, y: event.clientY }
     isDragging = false
+    ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
   }
 
   function onPointerMove(event: PointerEvent) {
-    if (!pointerDown) return
+    if (!pointerDown || (pointerId !== null && event.pointerId !== pointerId)) return
     const host = canvasHost.value
     if (!host) return
     const dx = (event.clientX - pointerDown.x) / Math.max(host.clientWidth, 1)
@@ -139,17 +143,29 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     }
   }
 
-  function onPointerUp(event: PointerEvent) {
+  function finishPointer(event?: PointerEvent, select = false) {
     const host = canvasHost.value
-    if (!host || !pointerDown) return
-    if (!isDragging) {
+    if (select && host && pointerDown && event && !isDragging) {
       const rect = host.getBoundingClientRect()
       const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1
       const ny = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
       sceneApi.value?.selectAt(nx, ny)
     }
+    const target = event?.currentTarget as HTMLElement | null
+    if (target && pointerId !== null && target.hasPointerCapture?.(pointerId)) {
+      target.releasePointerCapture(pointerId)
+    }
     pointerDown = null
+    pointerId = null
     isDragging = false
+  }
+
+  function onPointerUp(event: PointerEvent) {
+    finishPointer(event, true)
+  }
+
+  function onPointerCancel(event: PointerEvent) {
+    finishPointer(event)
   }
 
   function clearSelection() {
@@ -158,10 +174,30 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   function onPointerLeave() {
-    pointerDown = null
-    isDragging = false
+    if (pointerId === null) finishPointer()
     sceneApi.value?.setPointer(0, 0)
     sceneApi.value?.hoverAt(9, 9) // 远离画布 → 清除悬停
+  }
+
+  function onWheel(event: WheelEvent) {
+    const api = sceneApi.value
+    if (!api || useFallback.value) return
+    if (
+      event.ctrlKey ||
+      event.metaKey ||
+      !Number.isFinite(event.deltaY) ||
+      event.deltaY === 0
+    ) return
+    const multiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? Math.max(canvasHost.value?.clientHeight ?? 0, 1)
+        : 1
+    const delta = Math.max(-2400, Math.min(2400, event.deltaY * multiplier))
+    if (delta === 0) return
+    if (event.cancelable) event.preventDefault()
+    api.zoomBy(delta)
+    scheduleLabelSync()
   }
 
   useIntersectionObserver(
@@ -215,7 +251,9 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     onPointerDown,
     onPointerMove,
     onPointerUp,
+    onPointerCancel,
     onPointerLeave,
+    onWheel,
     clearSelection,
   }
 }

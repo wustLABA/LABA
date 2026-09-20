@@ -59,6 +59,7 @@ export interface IntelligenceSceneApi {
   mount: (container: HTMLElement) => void
   setMode: (mode: IntelligenceMode, expandForMode?: boolean) => void
   setPointer: (x: number, y: number) => void
+  zoomBy: (delta: number) => void
   selectAt: (x: number, y: number) => void
   hoverAt: (x: number, y: number) => void
   rotateBy: (x: number, y: number) => void

@@ -128,10 +128,40 @@ const micro = { label: '双星图', copy: '科研与工作，两条路径在这�
 
 .intelligence__field {
   position: relative;
-  min-height: clamp(20rem, 48svh, 28rem);
+  height: clamp(20rem, 48svh, 28rem);
   overflow: hidden;
   border-radius: 0;
   isolation: isolate;
+  /* One wide atmosphere layer: the field, not the canvas, owns the fade. */
+  background:
+    radial-gradient(
+      ellipse 58% 68% at 50% 50%,
+      color-mix(in srgb, var(--color-text) 46%, var(--color-success)) 0%,
+      color-mix(in srgb, var(--color-text) 62%, var(--color-success)) 38%,
+      color-mix(in srgb, var(--color-mountain) 32%, transparent) 66%,
+      transparent 100%
+    ),
+    radial-gradient(
+      ellipse 86% 78% at 50% 52%,
+      color-mix(in srgb, var(--color-glacier) 34%, transparent),
+      transparent 100%
+    );
+  mask-image: radial-gradient(
+    ellipse 88% 82% at 50% 50%,
+    #000 0%,
+    #000 42%,
+    rgb(0 0 0 / 0.94) 58%,
+    rgb(0 0 0 / 0.56) 78%,
+    transparent 100%
+  );
+  -webkit-mask-image: radial-gradient(
+    ellipse 88% 82% at 50% 50%,
+    #000 0%,
+    #000 42%,
+    rgb(0 0 0 / 0.94) 58%,
+    rgb(0 0 0 / 0.56) 78%,
+    transparent 100%
+  );
 }
 
 .intelligence__haze {
@@ -187,7 +217,7 @@ const micro = { label: '双星图', copy: '科研与工作，两条路径在这�
   }
 
   .intelligence__field {
-    min-height: clamp(16.5rem, 44svh, 22rem);
+    height: clamp(16.5rem, 44svh, 22rem);
   }
 }
 </style>

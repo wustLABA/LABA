@@ -5,6 +5,7 @@ import {
   BufferGeometry,
   Color,
   Group,
+  Line,
   LineBasicMaterial,
   LineLoop,
   LineSegments,
@@ -57,6 +58,9 @@ const RING_INTENSITY = 0.35
 const PLANE_SEG_DIM = 0.38 // 平面段亮度（最暗：只表达方位/半径）
 const VERT_SEG_BRIGHT = 0.8 // 垂直段亮度（较亮：表达高度信息）
 const BRIDGE_SEGMENTS = 24
+const MIN_VIEW_SCALE = 0.42
+const MAX_VIEW_SCALE = 1.2
+const WHEEL_ZOOM_FACTOR = 0.0012
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -136,6 +140,8 @@ export function createIntelligenceScene(
   let compact = false
   let viewH = 0.95
   let disposed = false
+  let projectionScale = -1
+  let projectionAspect = -1
   let raf = 0
   let lastTime = 0
 
@@ -152,7 +158,7 @@ export function createIntelligenceScene(
   let secondaryPoints: Points | null = null
   let ambientPoints: Points | null = null
   let guideLines: LineSegments | null = null
-  let bridgeLines: LineSegments | null = null
+  let bridgeLines: Line | null = null
   let hazePoints: Points | null = null
 
   let nodePositions: Float32Array | null = null
@@ -301,7 +307,7 @@ export function createIntelligenceScene(
   function getPrimaryLabels(forMode: IntelligenceMode): HotspotInfo[] {
     const source = forMode === 'build' ? activeBuild() : activeUnderstand()
     return source.nodes
-      .filter((n) => n.label)
+      .filter((n) => n.role === 'primary' && n.label)
       .map((n) => ({
         id: n.id,
         label: n.label!,
@@ -493,12 +499,12 @@ export function createIntelligenceScene(
     root.add(guideLines)
 
     // 双核桥连线（两团星之间的弧线，展开后才显现）
-    bridgePositions = new Float32Array((BRIDGE_SEGMENTS + 1) * 2 * 3)
-    bridgeColors = new Float32Array((BRIDGE_SEGMENTS + 1) * 2 * 3)
+    bridgePositions = new Float32Array((BRIDGE_SEGMENTS + 1) * 3)
+    bridgeColors = new Float32Array((BRIDGE_SEGMENTS + 1) * 3)
     const bridgeGeo = new BufferGeometry()
     bridgeGeo.setAttribute('position', new BufferAttribute(bridgePositions, 3))
     bridgeGeo.setAttribute('color', new BufferAttribute(bridgeColors, 3))
-    bridgeLines = new LineSegments(
+    bridgeLines = new Line(
       bridgeGeo,
       new LineBasicMaterial({
         vertexColors: true,
@@ -650,21 +656,15 @@ export function createIntelligenceScene(
     for (let s = 0; s <= BRIDGE_SEGMENTS; s++) {
       const tt = s / BRIDGE_SEGMENTS
       bezierPoint(tmpA, tmpC1, tmpC2, tmpB, tt, tmpP)
-      const vi = s * 6
+      const vi = s * 3
       bridgePositions[vi] = tmpP.x
       bridgePositions[vi + 1] = tmpP.y
       bridgePositions[vi + 2] = tmpP.z
-      bridgePositions[vi + 3] = tmpP.x
-      bridgePositions[vi + 4] = tmpP.y
-      bridgePositions[vi + 5] = tmpP.z
       colorMix.copy(COLOR.aurora).lerp(COLOR.sky, tt)
       const gain = (0.4 + 0.45 * Math.sin(Math.PI * tt)) * alpha
       bridgeColors[vi] = colorMix.r * gain
       bridgeColors[vi + 1] = colorMix.g * gain
       bridgeColors[vi + 2] = colorMix.b * gain
-      bridgeColors[vi + 3] = colorMix.r * gain
-      bridgeColors[vi + 4] = colorMix.g * gain
-      bridgeColors[vi + 5] = colorMix.b * gain
     }
     const geo = bridgeLines.geometry as BufferGeometry
     ;(geo.getAttribute('position') as BufferAttribute).needsUpdate = true
@@ -797,7 +797,12 @@ export function createIntelligenceScene(
         if (nodeAlpha > 0.004 && cl) flareGain = 1 + cl.flare * 1.2
       }
       const twinkle = 0.82 + Math.sin(pulseT * (1.9 + (i % 4) * 0.27) + i * 1.7) * 0.18
-      const gain = (0.85 + alpha * 0.35) * twinkle * flareGain
+      // PointsMaterial has a single material opacity, so encode per-node
+      // visibility in vertex brightness. A fully collapsed secondary must be
+      // black rather than merely dim, otherwise additive blending still shows it.
+      const gain = alpha <= 0.004
+        ? 0
+        : (0.85 + alpha * 0.35) * twinkle * flareGain
       nodeColors[ix] = Math.min(1, colorMix.r * gain)
       nodeColors[ix + 1] = Math.min(1, colorMix.g * gain)
       nodeColors[ix + 2] = Math.min(1, colorMix.b * gain)
@@ -867,8 +872,23 @@ export function createIntelligenceScene(
     void dt
   }
 
+  function updateCameraProjection() {
+    if (!camera) return
+    const aspect = width / Math.max(height, 1)
+    if (projectionScale === focus.scale && projectionAspect === aspect) return
+    const animatedViewW = viewH * aspect * focus.scale
+    camera.left = -animatedViewW
+    camera.right = animatedViewW
+    camera.top = viewH * focus.scale
+    camera.bottom = -viewH * focus.scale
+    camera.updateProjectionMatrix()
+    projectionScale = focus.scale
+    projectionAspect = aspect
+  }
+
   function updateCamera() {
     if (!camera || !root) return
+    updateCameraProjection()
     // 聚焦位移由 gsap 补间驱动（点击星点 → 流畅放大并飞向目标）
     root.position.set(focus.x, focus.y, 0)
     root.rotation.x = rotationX
@@ -925,12 +945,8 @@ export function createIntelligenceScene(
     if (!renderer || !camera) return
     renderer.setPixelRatio(maxDpr())
     renderer.setSize(width, height, false)
-    const animatedViewW = viewH * aspect * focus.scale
-    camera.left = -animatedViewW
-    camera.right = animatedViewW
-    camera.top = viewH * focus.scale
-    camera.bottom = -viewH * focus.scale
-    camera.updateProjectionMatrix()
+    projectionScale = -1
+    updateCameraProjection()
   }
 
   function mount(target: HTMLElement) {
@@ -1043,11 +1059,17 @@ export function createIntelligenceScene(
       )
     }
 
-    // 切换视角 = 聚焦对应的核心星团（深度学习·科研 ↔ research；AI Agent·工作 ↔ agent）
+    // 切换视角只保留当前路径的星团，避免两个星团在切换后同时常驻展开。
     if (expandForMode) {
-      const cluster = clusters.get(next === 'build' ? 'research' : 'agent')
-      if (cluster) expandCluster(cluster)
-      frameView()
+      const targetId = next === 'build' ? 'research' : 'agent'
+      const cluster = clusters.get(targetId)
+      for (const candidate of clusters.values()) {
+        if (candidate.id !== targetId) collapseCluster(candidate)
+      }
+      if (cluster) {
+        expandCluster(cluster)
+        flyToNode(cluster.id, 0.62)
+      }
     }
 
     options.onHotspotChange?.(null)
@@ -1058,6 +1080,28 @@ export function createIntelligenceScene(
     pointer.tx = Math.max(-1, Math.min(1, nx))
     pointer.ty = Math.max(-1, Math.min(1, ny))
     if (!reducedMotion) ensureLoop()
+  }
+
+  /** 滚轮缩放：正值拉远，负值靠近；保留当前聚焦位置作为镜头中心。 */
+  function zoomBy(delta: number) {
+    if (disposed || !Number.isFinite(delta) || delta === 0) return
+    const targetScale = Math.max(
+      MIN_VIEW_SCALE,
+      Math.min(MAX_VIEW_SCALE, focus.scale * Math.exp(delta * WHEEL_ZOOM_FACTOR)),
+    )
+    if (Math.abs(targetScale - focus.scale) < 0.0001) return
+    focusTween?.kill()
+    focusTween = null
+    if (reducedMotion) {
+      focus.scale = targetScale
+      renderFrame(0)
+      return
+    }
+    // Wheel events arrive in quick succession; update the target immediately so
+    // every tick compounds from the latest zoom level instead of a stale tween.
+    focus.scale = targetScale
+    updateCameraProjection()
+    renderFrame(0)
   }
 
   /** 旋转后的坐标（root 仅含 Rx·Ry），用于把节点居中到画面 */
@@ -1083,6 +1127,16 @@ export function createIntelligenceScene(
       renderFrame(0)
       return
     }
+    // Apply the destination immediately so the target stays visible while
+    // the frame animation is settling, then use the tween for the motion.
+    const from = { scale: focus.scale, x: focus.x, y: focus.y }
+    focus.scale = scale
+    focus.x = x
+    focus.y = y
+    renderFrame(0)
+    focus.scale = from.scale
+    focus.x = from.x
+    focus.y = from.y
     focusTween = gsap.to(focus, {
       scale,
       x,
@@ -1281,10 +1335,26 @@ export function createIntelligenceScene(
     if (value) {
       modeTween?.kill()
       awakenTween?.kill()
+      focusTween?.kill()
       modeTween = null
       awakenTween = null
+      focusTween = null
       awaken = 1
       morph = mode === 'understand' ? 1 : 0
+      for (const cluster of clusters.values()) {
+        cluster.collapseAt = null
+        if (cluster.expanded) {
+          cluster.grow = 1
+          cluster.alpha = 1
+          cluster.nodesAlpha = 1
+          cluster.flare = NODE_HOLD_FLARE
+        } else {
+          cluster.grow = 0
+          cluster.alpha = 0
+          cluster.nodesAlpha = 0
+          cluster.flare = 1
+        }
+      }
       stopLoop()
       renderFrame(0)
     } else {
@@ -1339,7 +1409,7 @@ export function createIntelligenceScene(
       renderer.domElement.remove()
     }
 
-    const disposeObj = (obj: Points | LineSegments | LineLoop | null) => {
+    const disposeObj = (obj: Points | Line | LineSegments | LineLoop | null) => {
       if (!obj) return
       obj.geometry.dispose()
       const mat = obj.material
@@ -1374,6 +1444,7 @@ export function createIntelligenceScene(
     mount,
     setMode,
     setPointer,
+    zoomBy,
     selectAt,
     hoverAt,
     rotateBy,
