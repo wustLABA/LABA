@@ -74,7 +74,17 @@ export interface IntelligenceSceneApi {
   setPointer: (x: number, y: number) => void
   zoomBy: (delta: number) => void
   enterClusterFocus: (clusterId: IntelligenceClusterId) => void
+  /**
+   * 开始退出星团视图：启动「节点与引导线缩回核心」动画。
+   * 收回期间 camera 保持不动（避免镜头拉远盖住收回过程），
+   * 播完后再由 finishExitFocus 回到全景取景。
+   * 收起时长与 GUIDE_FADE 对齐（约 1.2s）。
+   */
   exitClusterFocus: () => void
+  /** 收回动画是否仍在播放 —— composable 据此决定何时淡出并解除全屏。 */
+  isFocusSettling: () => boolean
+  /** 立即结束收起并回到全景取景（reducedMotion 或强制中断时使用）。 */
+  finishExitFocus: () => void
   selectAt: (x: number, y: number) => void
   /** 按 id 精确选中并飞向节点（tooltip 关联跳转用，不依赖坐标拾取）。 */
   selectNodeById: (id: string) => void

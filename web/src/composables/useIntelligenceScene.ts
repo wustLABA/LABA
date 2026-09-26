@@ -46,6 +46,13 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   const labelPositions = ref<Record<string, { x: number; y: number }>>({})
   const primaryLabels = ref<HotspotInfo[]>(labelsForMode('build'))
   const sceneApi = shallowRef<IntelligenceSceneApi | null>(null)
+  /**
+   * 退出动画所处阶段。视图据此叠加淡出遮罩：
+   *   idle       —— 正常态
+   *   collapsing —— 节点正在缩回核心（不遮罩，保证过程可见）
+   *   fading     —— 收回完成，画面正在淡出
+   */
+  const exitPhase = ref<'idle' | 'collapsing' | 'fading'>('idle')
 
   let labelRaf = 0
   let inlineVisible = false
@@ -229,15 +236,19 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   /**
-   * 退出星团视图。
+   * 退出星团视图 —— 严格三段式，与进入过程互逆：
    *
-   * 关键：不能立刻把 activeClusterId 置空 —— 那会让 Teleport 马上把画布
-   * 交还给内联小容器，收缩动画转而在那个几乎不可见的尺寸里播放，
-   * 用户看到的就是「节点直接消失」。
-   * 这里让画布维持全屏直到收缩动画播完（与 IntelligenceScene 的
-   * GUIDE_FADE 时长对齐），再真正退出全屏。
+   *   1. 收回（COLLAPSE_MS）：节点与引导线从外围缩回核心并淡出。
+   *      此阶段画布保持全屏、镜头保持不动，用户能完整看到「收回去」。
+   *   2. 淡出（FADE_OUT_MS）：在收回结果之上叠一层淡出遮罩，画面渐隐到
+   *      主页面底色，避免收回结束瞬间的硬切。
+   *   3. 交换：解除全屏，Teleport 把画布交还内联容器，并做一次全景取景。
+   *
+   * 之前只做了第 1 步的延时，缺第 2 步，所以收回刚结束画面就「啪」地
+   * 变回主页，看起来仍像直接消失。
    */
   const EXIT_COLLAPSE_MS = 1200
+  const EXIT_FADE_OUT_MS = 420
 
   function exitClusterFocus() {
     if (!activeClusterId.value) return
@@ -245,23 +256,42 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     // 立刻隐藏 tooltip / 选中态，避免卡片悬停在正在收缩的节点上
     hotspot.value = null
     hovered.value = null
+    exitPhase.value = 'collapsing'
     if (exitTimer) window.clearTimeout(exitTimer)
-    exitTimer = window.setTimeout(() => {
-      exitTimer = 0
-      activeClusterId.value = null
-      requestAnimationFrame(() => {
-        // After Teleport returns the host, the observer's last inline sample is
-        // authoritative again. This preserves the normal offscreen RAF pause.
-        isSectionVisible.value = inlineVisible
-        sceneApi.value?.setVisible(inlineVisible)
-      })
-      primaryLabels.value = labelsForMode(mode.value)
-      scheduleLabelSync()
-    }, prefersReducedMotion.value ? 0 : EXIT_COLLAPSE_MS)
+    exitTimer = window.setTimeout(
+      () => {
+        exitTimer = 0
+        // 收回已播完 —— 开始画面淡出
+        exitPhase.value = 'fading'
+        exitTimer = window.setTimeout(
+          () => {
+            exitTimer = 0
+            finishExit()
+          },
+          prefersReducedMotion.value ? 0 : EXIT_FADE_OUT_MS,
+        )
+      },
+      prefersReducedMotion.value ? 0 : EXIT_COLLAPSE_MS,
+    )
     primaryLabels.value = labelsForMode(mode.value)
     pointerDown = null
     pointerId = null
     isDragging = false
+    scheduleLabelSync()
+  }
+
+  /** 第三段：解除全屏、交还 Teleport、回到全景取景。 */
+  function finishExit() {
+    sceneApi.value?.finishExitFocus()
+    activeClusterId.value = null
+    exitPhase.value = 'idle'
+    requestAnimationFrame(() => {
+      // After Teleport returns the host, the observer's last inline sample is
+      // authoritative again. This preserves the normal offscreen RAF pause.
+      isSectionVisible.value = inlineVisible
+      sceneApi.value?.setVisible(inlineVisible)
+    })
+    primaryLabels.value = labelsForMode(mode.value)
     scheduleLabelSync()
   }
 
@@ -357,6 +387,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     hotspot,
     hovered,
     activeClusterId,
+    exitPhase,
     labelPositions,
     primaryLabels,
     onPointer,

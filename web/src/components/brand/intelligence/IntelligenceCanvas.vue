@@ -52,6 +52,7 @@ const {
   hotspot,
   hovered,
   activeClusterId,
+  exitPhase,
   labelPositions,
   onPointer,
   onPointerDown,
@@ -68,6 +69,12 @@ const {
 
 const selected = computed(() => hotspot.value)
 const focusedCluster = computed(() => activeClusterId.value)
+/**
+ * 退出过程中仍要保持全屏遮罩渲染，直到淡出结束才交还内联布局。
+ * `activeClusterId` 在 finishExit 之前不会清空，因此这里直接复用即可；
+ * 单独的 isExiting 用于在收回阶段禁用指针交互，避免动画中途被打断。
+ */
+const isExiting = computed(() => exitPhase.value !== 'idle')
 const focusedTitle = computed(() =>
   focusedCluster.value === 'research' ? '深度学习知识星团' : 'AI Agent 知识星团',
 )
@@ -79,6 +86,8 @@ function openCluster(clusterId: IntelligenceClusterId, trigger?: EventTarget | n
 }
 
 function closeCluster() {
+  // 退出动画进行中忽略重复触发，否则会重置计时器、把收回过程打断成两段
+  if (isExiting.value) return
   exitClusterFocus()
 }
 
@@ -192,14 +201,14 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
         >{{ selected.label }}</span>
       </div>
 
-      <template v-if="focusedCluster">
+      <template v-if="focusedCluster && !isExiting">
         <p class="intel-canvas__title">{{ focusedTitle }}</p>
         <p class="intel-canvas__exit-hint">左键拖动旋转 · 中键拖动平移 · 滚轮缩放 · 右键或 Escape 返回星图</p>
         <button ref="exitButton" class="intel-canvas__exit" type="button" @pointerdown.stop @click.stop="closeCluster">
           退出星团视图
         </button>
       </template>
-      <p v-else-if="!selected" class="intel-canvas__hint">左键拖动旋转 · 中键拖动平移 · 滚轮缩放 · 点击星点聚焦</p>
+      <p v-else-if="!selected && !isExiting" class="intel-canvas__hint">左键拖动旋转 · 中键拖动平移 · 滚轮缩放 · 点击星点聚焦</p>
 
       <!-- 节点 tooltip：名词释义卡片。仅在星团视图下、点选节点后出现 -->
       <div
@@ -236,6 +245,17 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
         <button type="button" data-cluster-id="research" @click="openCluster('research', $event.currentTarget)">进入深度学习知识星团</button>
         <button type="button" data-cluster-id="agent" @click="openCluster('agent', $event.currentTarget)">进入 AI Agent 知识星团</button>
       </div>
+
+      <!--
+        退出星团视图的第二阶段：节点缩回核心后，用一层与主页面同色的遮罩
+        把画面淡出，避免收回结束瞬间硬切回内联视图。
+        收回阶段（collapsing）不加遮罩，保证「缩回」过程完整可见。
+      -->
+      <div
+        v-if="exitPhase === 'fading'"
+        class="intel-canvas__fade"
+        aria-hidden="true"
+      />
     </div>
   </Teleport>
 </template>
@@ -269,6 +289,27 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
 .intel-canvas__exit-hint { left: clamp(1rem, 3vw, 2rem); bottom: clamp(1rem, 3vw, 2rem); margin: 0; color: color-mix(in srgb, var(--color-snow) 72%, transparent); font-size: var(--text-xs); letter-spacing: .08em; }
 .intel-canvas__exit { top: clamp(1rem, 3vw, 2rem); right: clamp(1rem, 3vw, 2rem); border: 1px solid color-mix(in srgb, var(--color-snow) 48%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--color-text) 54%, transparent); padding: .6rem .85rem; color: var(--color-snow); font: inherit; font-size: var(--text-xs); letter-spacing: .08em; cursor: pointer; }
 .intel-canvas__exit:focus-visible { outline: 2px solid var(--color-snow); outline-offset: 3px; }
+
+/* ── 退出淡出遮罩 ────────────────────────────────────────────────────────
+   盖在收回动画的结果之上，把全屏画面渐隐到主页面底色。
+   颜色取自 --color-snow，与主页面背景一致，因此淡出终点就是主页面的样子，
+   中间不会出现一帧突兀的深色块。 */
+.intel-canvas__fade {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: var(--color-snow);
+  animation: intel-fade-out 420ms ease-out forwards;
+}
+@keyframes intel-fade-out {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 减动效时不做渐显，直接切到终点，避免任何闪烁 */
+  .intel-canvas__fade { animation: none; opacity: 1; }
+}
 
 /* ── 节点 tooltip ────────────────────────────────────────────────────────
    玻璃卡片风格，与 Star Map 的深色聚焦背景同调（雪白文字 + 极光蓝描边）。

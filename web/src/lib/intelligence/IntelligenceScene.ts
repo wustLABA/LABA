@@ -285,6 +285,12 @@ export function createIntelligenceScene(
     grow: number
     born: number
     collapseAt: number | null
+    /**
+     * 开始收起那一刻的 grow 值。
+     * 收起按 grow 从该值线性回到 0，保证与进入时的生长动画严格互逆；
+     * 若直接按 1→0 计算，在展开未完成时退出会出现视觉跳变。
+     */
+    collapseFromGrow: number
     ringRadius: number
   }
 
@@ -329,6 +335,7 @@ export function createIntelligenceScene(
         grow: 0,
         born: 0,
         collapseAt: null,
+        collapseFromGrow: 1,
         ringRadius: 0.3,
       }
       clusters.set(cid, state)
@@ -632,8 +639,15 @@ export function createIntelligenceScene(
           c.grow = 0
           c.flare = 1
         } else {
-          c.alpha = 1 - k
-          c.nodesAlpha = c.alpha
+          // 退出必须与进入严格互逆：进入时 grow 0→1 让线段「生长」出来，
+          // 退出时就要 grow 1→0 让线段「缩回」核心。
+          // 早期实现只降 alpha 而冻结 grow，观感是引导线原地淡出、
+          // 而非收回，用户看到的便是「收到一半就没了」。
+          const back = Math.max(0, Math.min(1, 1 - k))
+          c.grow = c.collapseFromGrow * back
+          c.alpha = back
+          // 节点跟随引导线一起收回（进入时 nodesAlpha 随 grow 渐入）
+          c.nodesAlpha = back
           c.flare = 1
         }
       }
@@ -1649,6 +1663,8 @@ export function createIntelligenceScene(
       renderFrame(0)
       return
     }
+    // 记录当前生长进度，收起时按同一进度反向播放（展开中途退出也不会跳变）
+    cluster.collapseFromGrow = cluster.grow
     cluster.collapseAt = sceneT
     ensureLoop()
   }
@@ -1800,9 +1816,26 @@ export function createIntelligenceScene(
     ensureLoop()
   }
 
+  /**
+   * 退出星团视图 —— 两阶段，必须与进入过程严格互逆：
+   *
+   *   阶段 1（GUIDE_FADE）：节点与引导线从外围缩回核心，同时淡出。
+   *                        此时镜头【保持不动】，否则镜头拉远会和收回动画
+   *                        叠在一起，观感变成「收到一半就被切走」。
+   *   阶段 2（VIEW_FADE_OUT）：画面整体淡出，然后由 composable 解除全屏、
+   *                        镜头送回全景取景，露出主页面。
+   *
+   * 之所以把阶段 2 交给 composable 驱动（而非在这里直接 frameView），
+   * 是因为「淡出 → 交换 Teleport → 全景重新取景」必须按顺序发生在
+   * 同一个视觉叙事里，由持有 Teleport 状态的一方统一编排才不会互相打断。
+   */
   function exitClusterFocus() {
     if (disposed) return
-    activeClusterId = null
+    // 注意：这里【不】把 activeClusterId 置空。
+    // updateClusters() 里 `if (activeClusterId === c.id) c.alpha = 1` 会在
+    // 聚焦期间锁住 alpha；若在收起动画开始前就置空，收起逻辑虽能跑，
+    // 但 updateAmbient / 拾取 / 引导线亮度会立刻按「非聚焦」重算，
+    // 造成一帧内的亮度跳变。改为收起播完后再由 finishExitFocus 清空。
     focusedHotspot = null
     hoveredId = null
     panOffset.x = 0
@@ -1813,19 +1846,41 @@ export function createIntelligenceScene(
     for (const cluster of clusters.values()) collapseCluster(cluster)
     options.onHoverChange?.(null)
     options.onHotspotChange?.(null)
-    // 关键修正：旧实现立刻 frameView() 把镜头拉回全景，收缩动画被镜头切换
-    // 覆盖，观感等同于「节点直接消失」。现在让收缩动画先跑完再回到全景取景，
-    // 使退出与进入形成对称的可感知过程。
     if (reducedMotion) {
       frameView(0)
-    } else {
-      collapseViewTimer?.kill()
-      collapseViewTimer = gsap.delayedCall(GUIDE_FADE, () => {
-        collapseViewTimer = null
-        if (!disposed && !activeClusterId) frameView(0.95)
-      })
+      finishExitFocus()
+      return
     }
+    collapseViewTimer?.kill()
+    collapseViewTimer = gsap.delayedCall(GUIDE_FADE, () => {
+      collapseViewTimer = null
+      if (!disposed) finishExitFocus()
+    })
     ensureLoop()
+  }
+
+  /** 收回动画播完后真正退出聚焦态，并把镜头送回全景。 */
+  function finishExitFocus() {
+    collapseViewTimer?.kill()
+    collapseViewTimer = null
+    activeClusterId = null
+    focusedHotspot = null
+    hoveredId = null
+    for (const cluster of clusters.values()) {
+      cluster.expanded = false
+      cluster.collapseAt = null
+      cluster.alpha = 0
+      cluster.nodesAlpha = 0
+      cluster.grow = 0
+      cluster.flare = 1
+    }
+    frameView(0.95)
+    ensureLoop()
+  }
+
+  /** 供 composable 在解除全屏前调用，确保聚焦态已经结束。 */
+  function isFocusSettling() {
+    return collapseViewTimer != null
   }
 
   /**
@@ -2046,6 +2101,8 @@ export function createIntelligenceScene(
     zoomBy,
     enterClusterFocus,
     exitClusterFocus,
+    isFocusSettling,
+    finishExitFocus,
     selectAt,
     selectNodeById,
     hoverAt,
