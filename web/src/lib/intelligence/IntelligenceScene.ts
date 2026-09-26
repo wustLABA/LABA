@@ -28,6 +28,7 @@ import {
 } from './layouts'
 import type {
   HotspotInfo,
+  IntelligenceClusterId,
   IntelligenceMode,
   IntelligenceSceneApi,
   IntelligenceSceneOptions,
@@ -51,6 +52,7 @@ const GUIDE_SPLIT = 0.6 // 平面段占生长窗口 [0, SPLIT]，垂直段占 [S
 const GUIDE_GROW = 1.2 // s — 指引线从核心向外生长的时长
 const GUIDE_FADE = 1.2 // s — 收起时的淡出时长
 const NODE_FADE_IN = 0.4 // s — 星点闪光渐入
+const NODE_REVEAL_DELAY = GUIDE_GROW // 先完整展示引导线，再点亮子节点
 const NODE_HOLD_FLARE = 0.6 // 选中期间持续的高亮余量（诗云 HOLD_FLARE）
 const RING_SEGMENTS = 96 // 赤道参考环分段
 const RING_ALPHA = 0.16
@@ -58,7 +60,7 @@ const RING_INTENSITY = 0.35
 const PLANE_SEG_DIM = 0.38 // 平面段亮度（最暗：只表达方位/半径）
 const VERT_SEG_BRIGHT = 0.8 // 垂直段亮度（较亮：表达高度信息）
 const BRIDGE_SEGMENTS = 24
-const MIN_VIEW_SCALE = 0.42
+const MIN_VIEW_SCALE = 0.36
 const MAX_VIEW_SCALE = 1.2
 const WHEEL_ZOOM_FACTOR = 0.0012
 
@@ -183,6 +185,7 @@ export function createIntelligenceScene(
   let sceneT = 0
   let hoveredId: string | null = null
   let focusedHotspot: string | null = null
+  let activeClusterId: IntelligenceClusterId | null = null
   const focus = { scale: 1, x: 0, y: 0 }
   let rotationX = -0.08
   let rotationY = -0.18
@@ -194,11 +197,11 @@ export function createIntelligenceScene(
   const secondaryIds = nodeOrder.filter(
     (id) => buildLayout.nodes.find((n) => n.id === id)?.role === 'secondary',
   )
-  const clusterIds: string[] = ['research', 'agent']
+  const clusterIds: IntelligenceClusterId[] = ['research', 'agent']
 
   /** 星团状态机：expand → 平面段发散 → 垂直段上升 → 节点闪光渐入（诗云《行星指引》同款时序） */
   interface ClusterState {
-    id: string
+    id: IntelligenceClusterId
     coreIdx: number
     nodeIdxs: number[]
     expanded: boolean
@@ -235,7 +238,10 @@ export function createIntelligenceScene(
       for (const edge of buildLayout.edges) {
         if (edge.from !== cid) continue
         const idx = nodeOrder.indexOf(edge.to)
-        if (idx < 0) continue
+        const target = idx >= 0 ? buildLayout.nodes[idx] : undefined
+        // The dual-core bridge also originates at research. It is not a child
+        // of that cluster and must never enter its focus bounds or buffers.
+        if (!target || target.clusterId !== cid || target.role !== 'secondary') continue
         nodeIdxs.push(idx)
       }
       const state: ClusterState = {
@@ -290,6 +296,7 @@ export function createIntelligenceScene(
     const b = understandById.get(id)!
     return {
       id,
+      clusterId: a.clusterId,
       role: a.role,
       position: {
         x: lerp(a.position.x, b.position.x, t),
@@ -310,6 +317,7 @@ export function createIntelligenceScene(
       .filter((n) => n.role === 'primary' && n.label)
       .map((n) => ({
         id: n.id,
+        clusterId: n.clusterId,
         label: n.label!,
         microcopy: n.microcopy ?? '',
         mode: forMode,
@@ -324,13 +332,7 @@ export function createIntelligenceScene(
   }
 
   function shouldLoop() {
-    return (
-      !disposed &&
-      visible &&
-      documentVisible &&
-      !!renderer &&
-      (!reducedMotion || modeTween !== null)
-    )
+    return !disposed && visible && documentVisible && !!renderer
   }
 
   function ensureLoop() {
@@ -544,8 +546,12 @@ export function createIntelligenceScene(
         const age = Math.max(0, sceneT - c.born)
         c.grow = Math.min(1, age / GUIDE_GROW)
         c.alpha = Math.min(1, age / GUIDE_GROW)
-        c.nodesAlpha = Math.min(1, age / NODE_FADE_IN)
-        c.flare = Math.max(NODE_HOLD_FLARE, 1 - (1 - NODE_HOLD_FLARE) * (age / NODE_FADE_IN))
+        if (activeClusterId === c.id) c.alpha = 1
+        const nodeAge = Math.max(0, age - NODE_REVEAL_DELAY)
+        c.nodesAlpha = Math.min(1, nodeAge / NODE_FADE_IN)
+        c.flare = nodeAge <= 0
+          ? 1
+          : Math.max(NODE_HOLD_FLARE, 1 - (1 - NODE_HOLD_FLARE) * (nodeAge / NODE_FADE_IN))
       } else if (c.collapseAt != null) {
         const k = (sceneT - c.collapseAt) / GUIDE_FADE
         if (k >= 1) {
@@ -566,6 +572,8 @@ export function createIntelligenceScene(
   // ── 诗云《行星指引》平面坐标式：先向四周发散（平面段），再垂直方向发散（垂直段） ──
   function updateGuides() {
     if (!guidePositions || !guideColors || !guideLines || !nodePositions) return
+    const mat = guideLines.material as LineBasicMaterial
+    mat.opacity = activeClusterId ? 1 : 0.9
     for (const c of clusters.values()) {
       const env = c.alpha * awaken
       const ci = clusterIds.indexOf(c.id)
@@ -585,7 +593,12 @@ export function createIntelligenceScene(
         const oy = nodePositions[p + 1]! - cy
         const oz = nodePositions[p + 2]! - cz
         const hotNode = focusedHotspot === nodeOrder[idx] ? 1.5 : 1
-        const v = k * 12
+        // The guide geometry is shared by both constellations. Address each
+        // secondary by its global buffer index; using the cluster-local `k`
+        // made the second cluster overwrite the first cluster's guide lines.
+        const guideIndex = secondaryIds.indexOf(nodeOrder[idx]!)
+        if (guideIndex < 0) continue
+        const v = guideIndex * 12
         // v0 = 核心（平面段起点）
         guidePositions[v] = cx
         guidePositions[v + 1] = cy
@@ -629,6 +642,10 @@ export function createIntelligenceScene(
     const mat = bridgeLines.material as LineBasicMaterial
     const research = clusters.get('research')
     const agent = clusters.get('agent')
+    if (activeClusterId) {
+      mat.opacity = 0
+      return
+    }
     const alpha = Math.max(research?.alpha ?? 0, agent?.alpha ?? 0) * awaken
     if (alpha <= 0.004) {
       mat.opacity = 0
@@ -716,8 +733,12 @@ export function createIntelligenceScene(
     const t = smoothstep(morph)
     const { secondaryVisible, idleStrength } = counts()
     let secondaryShown = 0
-    let pIdx = 0
-    let sIdx = 0
+    const primaryPositions: number[] = []
+    const primaryColors: number[] = []
+    const primaryIdsForBuffer: string[] = []
+    const secondaryPositions: number[] = []
+    const secondaryColors: number[] = []
+    const secondaryIdsForBuffer: string[] = []
 
     pointer.x = lerp(pointer.x, pointer.tx, reducedMotion ? 1 : 0.08)
     pointer.y = lerp(pointer.y, pointer.ty, reducedMotion ? 1 : 0.08)
@@ -727,6 +748,7 @@ export function createIntelligenceScene(
       const layout = layoutAt(id, t)
       const isSecondary = layout.role === 'secondary'
       let hide = false
+      if (activeClusterId && layout.clusterId !== activeClusterId) hide = true
       if (isSecondary) {
         secondaryShown++
         if (secondaryShown > secondaryVisible) hide = true
@@ -735,6 +757,10 @@ export function createIntelligenceScene(
       const targetX = layout.position.x
       const targetY = layout.position.y
       const targetZ = layout.position.z
+      // The focused overlay uses the immutable layout as its framing source.
+      // Keep the active cluster pinned to that source so the inline spring
+      // cannot shift it after frameCluster() calculates its viewport center.
+      const freezeForFocus = activeClusterId === layout.clusterId
       // Depth layer: foreground responds more to pointer (~1–4px visual)
       const depthT = Math.max(0, Math.min(1, (targetZ + 0.35) / 0.75))
 
@@ -762,10 +788,13 @@ export function createIntelligenceScene(
       const pz = targetZ
       const ix = i * 3
 
-      if (reducedMotion || hide) {
-        nodePositions[ix] = px
-        nodePositions[ix + 1] = py
-        nodePositions[ix + 2] = pz
+      if (reducedMotion || hide || freezeForFocus) {
+        nodePositions[ix] = targetX
+        nodePositions[ix + 1] = targetY
+        nodePositions[ix + 2] = targetZ
+        nodeVel[ix] = 0
+        nodeVel[ix + 1] = 0
+        nodeVel[ix + 2] = 0
       } else {
         const forceX = (px - nodePositions[ix]!) * 7.5
         const forceY = (py - nodePositions[ix + 1]!) * 7.5
@@ -788,12 +817,19 @@ export function createIntelligenceScene(
       colorMix.lerp(COLOR.snow, 0.22)
       const depthFade = 0.62 + depthT * 0.38
       let alpha = hide ? 0 : layout.opacity * awaken * depthFade * (hot ? 1 : 0.9)
+      // Point draw ranges are contiguous while primary vertices are interleaved
+      // before every secondary. Explicitly black the inactive cluster so an
+      // isolated full-screen view can never leak the opposite core.
+      if (activeClusterId && layout.clusterId !== activeClusterId) alpha = 0
       let flareGain = 1
       if (layout.role === 'secondary') {
         // 未展开的星团：星点完全隐藏；展开时闪光渐入（诗云 FADE_IN + HOLD_FLARE）
         const cl = nodeClusterById.get(id)
         const nodeAlpha = cl ? cl.nodesAlpha : 0
         alpha *= nodeAlpha
+        if (activeClusterId && layout.clusterId === activeClusterId) {
+          alpha = Math.max(alpha, nodeAlpha * 0.9)
+        }
         if (nodeAlpha > 0.004 && cl) flareGain = 1 + cl.flare * 1.2
       }
       const twinkle = 0.82 + Math.sin(pulseT * (1.9 + (i % 4) * 0.27) + i * 1.7) * 0.18
@@ -807,26 +843,60 @@ export function createIntelligenceScene(
       nodeColors[ix + 1] = Math.min(1, colorMix.g * gain)
       nodeColors[ix + 2] = Math.min(1, colorMix.b * gain)
 
-      if (layout.role === 'primary') {
-        const pi = pIdx * 3
-        primaryPos[pi] = nodePositions[ix]!
-        primaryPos[pi + 1] = nodePositions[ix + 1]!
-        primaryPos[pi + 2] = nodePositions[ix + 2]!
-        primaryCol[pi] = nodeColors[ix]!
-        primaryCol[pi + 1] = nodeColors[ix + 1]!
-        primaryCol[pi + 2] = nodeColors[ix + 2]!
-        pIdx++
-      } else {
-        const si = sIdx * 3
-        secondaryPos[si] = nodePositions[ix]!
-        secondaryPos[si + 1] = nodePositions[ix + 1]!
-        secondaryPos[si + 2] = nodePositions[ix + 2]!
-        secondaryCol[si] = nodeColors[ix]!
-        secondaryCol[si + 1] = nodeColors[ix + 1]!
-        secondaryCol[si + 2] = nodeColors[ix + 2]!
-        sIdx++
-      }
+      const positions = layout.role === 'primary' ? primaryPositions : secondaryPositions
+      const colors = layout.role === 'primary' ? primaryColors : secondaryColors
+      const ids = layout.role === 'primary' ? primaryIdsForBuffer : secondaryIdsForBuffer
+      positions.push(
+        nodePositions[ix]!,
+        nodePositions[ix + 1]!,
+        nodePositions[ix + 2]!,
+      )
+      colors.push(nodeColors[ix]!, nodeColors[ix + 1]!, nodeColors[ix + 2]!)
+      ids.push(id)
     }
+
+    // BufferGeometry draw ranges are contiguous. Repack the active cluster at
+    // the front of each buffer so focused mode submits exactly one core and its
+    // children instead of relying on invisible vertices in the other cluster.
+    const writePointBuffer = (
+      positions: number[],
+      colors: number[],
+      nodeIds: string[],
+      sourcePositions: Float32Array,
+      sourceColors: Float32Array,
+      activeId: IntelligenceClusterId | null,
+    ) => {
+      let target = 0
+      for (let index = 0; index < positions.length / 3; index++) {
+        const offset = index * 3
+        const layout = layoutAt(nodeIds[index]!, t)
+        if (activeId && layout.clusterId !== activeId) continue
+        sourcePositions[target] = positions[offset]!
+        sourcePositions[target + 1] = positions[offset + 1]!
+        sourcePositions[target + 2] = positions[offset + 2]!
+        sourceColors[target] = colors[offset]!
+        sourceColors[target + 1] = colors[offset + 1]!
+        sourceColors[target + 2] = colors[offset + 2]!
+        target += 3
+      }
+      return target / 3
+    }
+    const activePrimaryCount = writePointBuffer(
+      primaryPositions,
+      primaryColors,
+      primaryIdsForBuffer,
+      primaryPos,
+      primaryCol,
+      activeClusterId,
+    )
+    const activeSecondaryCount = writePointBuffer(
+      secondaryPositions,
+      secondaryColors,
+      secondaryIdsForBuffer,
+      secondaryPos,
+      secondaryCol,
+      activeClusterId,
+    )
 
     if (!reducedMotion && morph < 0.45 && awaken > 0.7) {
       pulseT += dt
@@ -840,6 +910,20 @@ export function createIntelligenceScene(
     const sGeo = secondaryPoints.geometry as BufferGeometry
     ;(sGeo.getAttribute('position') as BufferAttribute).needsUpdate = true
     ;(sGeo.getAttribute('color') as BufferAttribute).needsUpdate = true
+
+    // Secondary draw ranges establish the collapsed default. The focused
+    // buffers have just been packed to a contiguous selected-cluster prefix.
+    if (activeClusterId) {
+      const cluster = clusters.get(activeClusterId)
+      pGeo.setDrawRange(0, activePrimaryCount)
+      sGeo.setDrawRange(
+        0,
+        cluster && cluster.nodesAlpha > 0.004 ? activeSecondaryCount : 0,
+      )
+    } else {
+      pGeo.setDrawRange(0, activePrimaryCount)
+      sGeo.setDrawRange(0, 0)
+    }
     ;(primaryPoints.material as PointsMaterial).opacity = 0.7 + awaken * 0.28
     ;(primaryPoints.material as PointsMaterial).size = tier === 'reduced' ? 34 : compact ? 46 : 52
     ;(secondaryPoints.material as PointsMaterial).opacity = 0.32 + awaken * 0.36
@@ -868,7 +952,14 @@ export function createIntelligenceScene(
     }
     ;(ambientPoints.geometry.getAttribute('position') as BufferAttribute).needsUpdate =
       true
-    ;(ambientPoints.material as PointsMaterial).opacity = 0.08 + awaken * 0.18
+    // The focused presentation is an isolated constellation, not the inline
+    // field atmosphere. Hide ambient sprites so they cannot resemble a second core.
+    ;(ambientPoints.material as PointsMaterial).opacity = activeClusterId
+      ? 0
+      : 0.08 + awaken * 0.18
+    if (hazePoints) {
+      ;(hazePoints.material as PointsMaterial).opacity = activeClusterId ? 0 : 0.055
+    }
     void dt
   }
 
@@ -889,11 +980,17 @@ export function createIntelligenceScene(
   function updateCamera() {
     if (!camera || !root) return
     updateCameraProjection()
-    // 聚焦位移由 gsap 补间驱动（点击星点 → 流畅放大并飞向目标）
+    // Full-screen focus starts as a readable front-facing constellation. The
+    // regular field retains its subtle tilt; drag can introduce rotation only
+    // after the focused presentation is already framed.
+    const activeRotationX = activeClusterId ? 0 : rotationX
+    const activeRotationY = activeClusterId ? 0 : rotationY
+    root.rotation.x = activeRotationX
+    root.rotation.y = activeRotationY
+    // Camera and root positions are evaluated together. Translating the root
+    // by the focus target keeps a front-facing orthographic cluster centered.
     root.position.set(focus.x, focus.y, 0)
-    root.rotation.x = rotationX
-    root.rotation.y = rotationY
-    if (reducedMotion) {
+    if (reducedMotion || activeClusterId) {
       camera.position.x = 0
       camera.position.y = 0
       return
@@ -1018,7 +1115,7 @@ export function createIntelligenceScene(
     }
   }
 
-  function setMode(next: IntelligenceMode, expandForMode = true) {
+  function setMode(next: IntelligenceMode, expandForMode = false) {
     if (disposed) return
     if (next === mode) {
       // 同一视角重复触发：确保对应星团展开
@@ -1120,10 +1217,13 @@ export function createIntelligenceScene(
     if (disposed) return
     focusTween?.kill()
     focusTween = null
-    if (reducedMotion) {
+    if (reducedMotion || duration === 0) {
       focus.scale = scale
       focus.x = x
       focus.y = y
+      // The camera projection cache keys only scale and aspect. Force it to
+      // recalculate when a synchronous full-screen focus changes scale.
+      projectionScale = -1
       renderFrame(0)
       return
     }
@@ -1133,10 +1233,12 @@ export function createIntelligenceScene(
     focus.scale = scale
     focus.x = x
     focus.y = y
+    projectionScale = -1
     renderFrame(0)
     focus.scale = from.scale
     focus.x = from.x
     focus.y = from.y
+    projectionScale = -1
     focusTween = gsap.to(focus, {
       scale,
       x,
@@ -1168,6 +1270,72 @@ export function createIntelligenceScene(
     for (const c of clusters.values()) if (c.expanded) anyExpanded = true
     if (anyExpanded) flyTo(0.85, 0, 0, duration)
     else flyTo(1, 0, 0, duration)
+  }
+
+  /** Frame one constellation using its current rotated layout bounds. */
+  function frameCluster(cluster: ClusterState, duration = 0.95) {
+    if (!nodePositions || !camera) return
+    // Full-screen focus renders front-facing, so measure in that same space
+    // instead of the inline field's tilted root orientation.
+    const focusRotationX = 0
+    const focusRotationY = 0
+    const points = [cluster.coreIdx, ...cluster.nodeIdxs]
+    // The node spring positions were calculated in the smaller inline field.
+    // Snap the selected cluster to its layout before measuring overlay bounds.
+    for (const idx of points) {
+      const node = layoutAt(nodeOrder[idx]!, smoothstep(morph))
+      nodePositions[idx * 3] = node.position.x
+      nodePositions[idx * 3 + 1] = node.position.y
+      nodePositions[idx * 3 + 2] = node.position.z
+      nodeVel?.fill(0, idx * 3, idx * 3 + 3)
+    }
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+
+    for (const idx of points) {
+      // Frame against the active layout rather than the spring buffer. The
+      // buffer is updated again during the same render after a Teleport resize,
+      // while layout coordinates remain the stable source of truth.
+      const node = layoutAt(nodeOrder[idx]!, smoothstep(morph)).position
+      const cy = Math.cos(focusRotationY)
+      const sy = Math.sin(focusRotationY)
+      const cx = Math.cos(focusRotationX)
+      const sx = Math.sin(focusRotationX)
+      const x1 = node.x * cy + node.z * sy
+      const z1 = -node.x * sy + node.z * cy
+      const rotatedX = x1
+      const rotatedY = node.y * cx - z1 * sx
+      minX = Math.min(minX, rotatedX)
+      maxX = Math.max(maxX, rotatedX)
+      minY = Math.min(minY, rotatedY)
+      maxY = Math.max(maxY, rotatedY)
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return
+
+    const halfWidth = Math.max(0.001, (maxX - minX) * 0.5)
+    const halfHeight = Math.max(0.001, (maxY - minY) * 0.5)
+    const aspect = width / Math.max(height, 1)
+    // Frame from both projected axes. The prior vertical-only calculation hit
+    // the minimum scale on wide displays, making the focused constellation
+    // look like a thin, distant line across the viewport.
+    const padding = 1.3
+    const scale = Math.max(
+      MIN_VIEW_SCALE,
+      Math.min(
+        0.58,
+        Math.max(
+          (halfWidth * padding) / Math.max(viewH * aspect, 0.001),
+          (halfHeight * padding) / Math.max(viewH, 0.001),
+        ),
+      ),
+    )
+    const centerX = (minX + maxX) * 0.5
+    const centerY = (minY + maxY) * 0.5
+    // Root translation moves geometry in the same direction, so offset by the
+    // inverse midpoint to align the selected cluster with the viewport.
+    flyTo(scale, -centerX, -centerY, duration)
   }
 
   function expandCluster(cluster: ClusterState) {
@@ -1216,6 +1384,7 @@ export function createIntelligenceScene(
     const source = morph < 0.5 ? activeBuild() : activeUnderstand()
     const m: IntelligenceMode = morph < 0.5 ? 'build' : 'understand'
     for (const n of source.nodes) {
+      if (activeClusterId && n.clusterId !== activeClusterId) continue
       const isPrimary = n.role === 'primary'
       if (!isPrimary) {
         // 只有已展开（闪光渐入过半）的星团里的星点可被点选
@@ -1231,7 +1400,13 @@ export function createIntelligenceScene(
       if (distance < threshold && distance < bestDist) {
         bestDist = distance
         best = {
-          info: { id: n.id, label: n.label!, microcopy: n.microcopy ?? '', mode: m },
+          info: {
+            id: n.id,
+            clusterId: n.clusterId,
+            label: n.label!,
+            microcopy: n.microcopy ?? '',
+            mode: m,
+          },
           isPrimary,
         }
       }
@@ -1262,21 +1437,9 @@ export function createIntelligenceScene(
     }
 
     if (hit.isPrimary) {
-      const cluster = clusters.get(hit.info.id)
-      if (!cluster) return
-      if (cluster.expanded) {
-        // 再次点击核心 → 收起星团
-        collapseCluster(cluster)
-        focusedHotspot = null
-        options.onHotspotChange?.(null)
-        frameView()
-      } else {
-        // 点击核心 → 诗云式展开（先四周发散，再垂直发散）+ 相机飞向星团
-        expandCluster(cluster)
-        focusedHotspot = cluster.id
-        options.onHotspotChange?.(hit.info)
-        flyToNode(cluster.id, 0.62)
-      }
+      if (activeClusterId) return
+      options.onClusterActivate?.(hit.info.clusterId)
+      return
     } else {
       // 点击小节点 → 流畅放大并聚焦过去，名称显示在节点上方
       focusedHotspot = hit.info.id
@@ -1293,6 +1456,54 @@ export function createIntelligenceScene(
     ensureLoop()
   }
 
+  function enterClusterFocus(clusterId: IntelligenceClusterId) {
+    if (disposed) return
+    const isNewFocus = activeClusterId !== clusterId
+    activeClusterId = clusterId
+    visible = true
+    focusedHotspot = clusterId
+    hoveredId = null
+    for (const cluster of clusters.values()) {
+      if (cluster.id === clusterId) {
+        if (isNewFocus) {
+          cluster.expanded = false
+          cluster.alpha = 0
+          cluster.nodesAlpha = 0
+          cluster.grow = 0
+        }
+        expandCluster(cluster)
+      } else {
+        cluster.expanded = false
+        cluster.alpha = 0
+        cluster.nodesAlpha = 0
+        cluster.grow = 0
+        cluster.flare = 1
+        cluster.collapseAt = null
+      }
+    }
+    options.onHoverChange?.(null)
+    options.onHotspotChange?.(null)
+    const active = clusters.get(clusterId)
+    if (active) frameCluster(active, 0)
+    // `frameCluster()` updates the focus target. Render synchronously only
+    // after that target is committed so the Teleport overlay never flashes an
+    // inline-camera frame before its RAF continues the reveal.
+    renderFrame(0)
+    ensureLoop()
+  }
+
+  function exitClusterFocus() {
+    if (disposed) return
+    activeClusterId = null
+    focusedHotspot = null
+    hoveredId = null
+    for (const cluster of clusters.values()) collapseCluster(cluster)
+    options.onHoverChange?.(null)
+    options.onHotspotChange?.(null)
+    frameView()
+    ensureLoop()
+  }
+
   function rotateBy(dx: number, dy: number) {
     if (reducedMotion) return
     rotationY += dx * 1.25
@@ -1300,10 +1511,14 @@ export function createIntelligenceScene(
     ensureLoop()
   }
 
-  function setVisible(v: boolean) {
-    visible = v
-    if (v) ensureLoop()
-    else stopLoop()
+  function setVisible(nextVisible: boolean) {
+    visible = nextVisible
+    if (nextVisible) {
+      ensureLoop()
+      renderFrame(0)
+    } else {
+      stopLoop()
+    }
   }
 
   function setAwake(awake: boolean) {
@@ -1445,6 +1660,8 @@ export function createIntelligenceScene(
     setMode,
     setPointer,
     zoomBy,
+    enterClusterFocus,
+    exitClusterFocus,
     selectAt,
     hoverAt,
     rotateBy,

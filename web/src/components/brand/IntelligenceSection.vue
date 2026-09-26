@@ -147,20 +147,20 @@ const micro = { label: '双星图', copy: '科研与工作，两条路径在这�
       transparent 100%
     );
   mask-image: radial-gradient(
-    ellipse 88% 82% at 50% 50%,
+    ellipse 70% 76% at 50% 50%,
     #000 0%,
-    #000 42%,
-    rgb(0 0 0 / 0.94) 58%,
-    rgb(0 0 0 / 0.56) 78%,
-    transparent 100%
+    #000 40%,
+    rgb(0 0 0 / 0.84) 58%,
+    rgb(0 0 0 / 0.3) 72%,
+    transparent 88%
   );
   -webkit-mask-image: radial-gradient(
-    ellipse 88% 82% at 50% 50%,
+    ellipse 70% 76% at 50% 50%,
     #000 0%,
-    #000 42%,
-    rgb(0 0 0 / 0.94) 58%,
-    rgb(0 0 0 / 0.56) 78%,
-    transparent 100%
+    #000 40%,
+    rgb(0 0 0 / 0.84) 58%,
+    rgb(0 0 0 / 0.3) 72%,
+    transparent 88%
   );
 }
 

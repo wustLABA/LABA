@@ -8,6 +8,7 @@ import {
 } from '../lib/intelligence/IntelligenceScene'
 import type {
   HotspotInfo,
+  IntelligenceClusterId,
   IntelligenceMode,
   IntelligenceSceneApi,
 } from '../lib/intelligence/types'
@@ -19,6 +20,7 @@ function labelsForMode(mode: IntelligenceMode): HotspotInfo[] {
     .filter((n) => n.role === 'primary' && n.label)
     .map((n) => ({
       id: n.id,
+      clusterId: n.clusterId,
       label: n.label!,
       microcopy: n.microcopy ?? '',
       mode,
@@ -33,11 +35,13 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   const hasAwakened = ref(false)
   const hotspot = ref<HotspotInfo | null>(null)
   const hovered = ref<HotspotInfo | null>(null)
+  const activeClusterId = ref<IntelligenceClusterId | null>(null)
   const labelPositions = ref<Record<string, { x: number; y: number }>>({})
   const primaryLabels = ref<HotspotInfo[]>(labelsForMode('build'))
   const sceneApi = shallowRef<IntelligenceSceneApi | null>(null)
 
   let labelRaf = 0
+  let inlineVisible = false
   let pointerDown: { x: number; y: number } | null = null
   let pointerId: number | null = null
   let isDragging = false
@@ -46,7 +50,9 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     const api = sceneApi.value
     if (!api) return
     const next: Record<string, { x: number; y: number }> = {}
-    const labels = [...api.getPrimaryLabels(mode.value)]
+    const labels = activeClusterId.value
+      ? primaryLabels.value.filter((item) => item.clusterId === activeClusterId.value)
+      : [...api.getPrimaryLabels(mode.value)]
     if (hovered.value && !labels.some((item) => item.id === hovered.value?.id)) {
       labels.push(hovered.value)
     }
@@ -89,6 +95,9 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
         hovered.value = next
         scheduleLabelSync()
       },
+      onClusterActivate(clusterId) {
+        enterClusterFocus(clusterId)
+      },
       onReady() {
         scheduleLabelSync()
       },
@@ -105,7 +114,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   function setMode(next: IntelligenceMode) {
     mode.value = next
     primaryLabels.value = labelsForMode(next)
-    sceneApi.value?.setMode(next)
+    sceneApi.value?.setMode(next, false)
     hotspot.value = null
     syncLabels()
   }
@@ -123,6 +132,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   function onPointerDown(event: PointerEvent) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
     if (pointerId !== null) return
     pointerId = event.pointerId
     pointerDown = { x: event.clientX, y: event.clientY }
@@ -161,11 +171,52 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   function onPointerUp(event: PointerEvent) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
     finishPointer(event, true)
   }
 
   function onPointerCancel(event: PointerEvent) {
     finishPointer(event)
+  }
+
+  function enterClusterFocus(clusterId: IntelligenceClusterId) {
+    // Start the scene lifecycle before moving the one canvas through Teleport.
+    // The next frame measures its full-viewport host, then begins the guide
+    // reveal against the final camera dimensions.
+    sceneApi.value?.setVisible(true)
+    sceneApi.value?.setAwake(true)
+    activeClusterId.value = clusterId
+    isSectionVisible.value = true
+    requestAnimationFrame(() => {
+      const host = canvasHost.value
+      if (!host || activeClusterId.value !== clusterId) return
+      sceneApi.value?.resize(host.clientWidth, host.clientHeight)
+      sceneApi.value?.enterClusterFocus(clusterId)
+    })
+    primaryLabels.value = labelsForMode(mode.value).filter(
+      (item) => item.clusterId === clusterId,
+    )
+    hotspot.value = null
+    hovered.value = null
+    scheduleLabelSync()
+  }
+
+  function exitClusterFocus() {
+    sceneApi.value?.exitClusterFocus()
+    activeClusterId.value = null
+    requestAnimationFrame(() => {
+      // After Teleport returns the host, the observer's last inline sample is
+      // authoritative again. This preserves the normal offscreen RAF pause.
+      isSectionVisible.value = inlineVisible
+      sceneApi.value?.setVisible(inlineVisible)
+    })
+    primaryLabels.value = labelsForMode(mode.value)
+    hotspot.value = null
+    hovered.value = null
+    pointerDown = null
+    pointerId = null
+    isDragging = false
+    scheduleLabelSync()
   }
 
   function clearSelection() {
@@ -203,8 +254,11 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   useIntersectionObserver(
     canvasHost,
     ([entry]) => {
-      const visible = !!entry?.isIntersecting
+      inlineVisible = !!entry?.isIntersecting
+      const visible = inlineVisible || activeClusterId.value !== null
       isSectionVisible.value = visible
+      // Teleport may transiently report the moved inline host as outside the
+      // viewport. The overlay remains the visibility authority while focused.
       sceneApi.value?.setVisible(visible)
       if (visible && !hasAwakened.value) {
         hasAwakened.value = true
@@ -233,6 +287,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
 
   onBeforeUnmount(() => {
     if (labelRaf) cancelAnimationFrame(labelRaf)
+    activeClusterId.value = null
     sceneApi.value?.dispose()
     sceneApi.value = null
   })
@@ -245,6 +300,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     hasAwakened,
     hotspot,
     hovered,
+    activeClusterId,
     labelPositions,
     primaryLabels,
     onPointer,
@@ -254,6 +310,8 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     onPointerCancel,
     onPointerLeave,
     onWheel,
+    enterClusterFocus,
+    exitClusterFocus,
     clearSelection,
   }
 }

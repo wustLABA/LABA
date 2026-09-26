@@ -1,4 +1,9 @@
-import type { EdgeLayout, NodeLayout, SceneLayout } from './types'
+import type {
+  EdgeLayout,
+  IntelligenceClusterId,
+  NodeLayout,
+  SceneLayout,
+} from './types'
 
 type Topic = readonly [label: string, copy: string]
 
@@ -28,8 +33,28 @@ const agentTopics: Topic[] = [
   ['成本优化', '在速度、效果与调用成本间平衡。'], ['产品设计', '围绕真实工作场景设计体验。'],
 ]
 
-function node(id: string, x: number, y: number, z: number, role: NodeLayout['role'], label: string, microcopy: string, scale: number): NodeLayout {
-  return { id, position: { x, y, z }, role, label, microcopy, hotspot: true, scale, opacity: role === 'primary' ? 1 : 0.75 }
+function node(
+  id: string,
+  clusterId: IntelligenceClusterId,
+  x: number,
+  y: number,
+  z: number,
+  role: NodeLayout['role'],
+  label: string,
+  microcopy: string,
+  scale: number,
+): NodeLayout {
+  return {
+    id,
+    clusterId,
+    position: { x, y, z },
+    role,
+    label,
+    microcopy,
+    hotspot: true,
+    scale,
+    opacity: role === 'primary' ? 1 : 0.75,
+  }
 }
 
 // ── 诗云《行星分布》同款公式（positions.ts · poemOffset）：黄金角球面分布 ──
@@ -49,6 +74,7 @@ function hashStr(input: string): number {
 
 function makeCluster(
   prefix: string,
+  clusterId: IntelligenceClusterId,
   centerX: number,
   topics: Topic[],
   shape: { ax: number; ay: number; az: number },
@@ -70,6 +96,7 @@ function makeCluster(
     nodes.push(
       node(
         id,
+        clusterId,
         centerX + rxy * Math.cos(th) * rho * shape.ax,
         yd * rho * shape.ay,
         0.33 + rxy * Math.sin(th) * rho * shape.az,
@@ -84,11 +111,11 @@ function makeCluster(
   return { nodes, edges }
 }
 
-const research = makeCluster('r', -0.72, researchTopics, { ax: 0.92, ay: 0.88, az: 0.7 })
-const agent = makeCluster('a', 0.72, agentTopics, { ax: 0.88, ay: 0.94, az: 0.76 })
+const research = makeCluster('r', 'research', -0.72, researchTopics, { ax: 0.92, ay: 0.88, az: 0.7 })
+const agent = makeCluster('a', 'agent', 0.72, agentTopics, { ax: 0.88, ay: 0.94, az: 0.76 })
 const cores = [
-  node('research', -0.72, 0, 0.38, 'primary', '深度学习', '走向模型、论文与科研的深水区。', 1.5),
-  node('agent', 0.72, 0, 0.38, 'primary', 'AI Agent', '把智能组织成能在工作中完成任务的系统。', 1.5),
+  node('research', 'research', -0.72, 0, 0.38, 'primary', '深度学习', '走向模型、论文与科研的深水区。', 1.5),
+  node('agent', 'agent', 0.72, 0, 0.38, 'primary', 'AI Agent', '把智能组织成能在工作中完成任务的系统。', 1.5),
 ]
 const bridge: EdgeLayout = { id: 'e-bridge', from: 'research', to: 'agent', opacity: 0.9, curved: true, kind: 'attention', hierarchy: 'primary', weight: 1 }
 

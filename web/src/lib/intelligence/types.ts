@@ -1,5 +1,7 @@
 export type IntelligenceMode = 'build' | 'understand'
 
+export type IntelligenceClusterId = 'research' | 'agent'
+
 export type PerformanceTier = 'high' | 'balanced' | 'reduced'
 
 export type NodeRole = 'primary' | 'secondary'
@@ -14,6 +16,7 @@ export interface Vec3 {
 
 export interface NodeLayout {
   id: string
+  clusterId: IntelligenceClusterId
   position: Vec3
   scale: number
   opacity: number
@@ -41,6 +44,7 @@ export interface SceneLayout {
 
 export interface HotspotInfo {
   id: string
+  clusterId: IntelligenceClusterId
   label: string
   microcopy: string
   mode: IntelligenceMode
@@ -53,6 +57,7 @@ export interface IntelligenceSceneOptions {
   onError?: (error: Error) => void
   onHotspotChange?: (hotspot: HotspotInfo | null) => void
   onHoverChange?: (hotspot: HotspotInfo | null) => void
+  onClusterActivate?: (clusterId: IntelligenceClusterId) => void
 }
 
 export interface IntelligenceSceneApi {
@@ -60,6 +65,8 @@ export interface IntelligenceSceneApi {
   setMode: (mode: IntelligenceMode, expandForMode?: boolean) => void
   setPointer: (x: number, y: number) => void
   zoomBy: (delta: number) => void
+  enterClusterFocus: (clusterId: IntelligenceClusterId) => void
+  exitClusterFocus: () => void
   selectAt: (x: number, y: number) => void
   hoverAt: (x: number, y: number) => void
   rotateBy: (x: number, y: number) => void

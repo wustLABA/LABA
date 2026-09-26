@@ -39,5 +39,8 @@ Thumbs.db
 *.tsbuildinfo
 .vite/
 
+# 本地调试截图产物（体积大且为一次性验证素材，不入库）
+web/artifacts/
+
 # Agent workspace (local session data)
 .workbuddy/
