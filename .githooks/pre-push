@@ -53,18 +53,28 @@ fi
 WEB="$ROOT/web"
 [ -d "$WEB" ] || exit 0
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[deploy] 未找到 npm，跳过本地部署。"
+# 包管理器一律使用 pnpm：本机 npm/npx 已损坏（npm-prefix.js 缺失），
+# 调用 npm 会直接抛 MODULE_NOT_FOUND。pnpm 为本仓库约定的唯一包管理器。
+# 优先 pnpm，回退 corepack，最后才退回 npm（供环境未装 pnpm 的协作者）。
+PKG_MGR=""
+if command -v pnpm >/dev/null 2>&1; then
+  PKG_MGR="pnpm"
+elif command -v corepack >/dev/null 2>&1; then
+  PKG_MGR="corepack pnpm"
+elif command -v npm >/dev/null 2>&1; then
+  PKG_MGR="npm"
+else
+  echo "[deploy] 未找到 pnpm / corepack / npm，跳过本地部署。"
   exit 0
 fi
 
 if [ ! -d "$WEB/node_modules" ]; then
-  echo "[deploy] 跳过：web/node_modules 不存在（先执行 cd web && npm install）。"
+  echo "[deploy] 跳过：web/node_modules 不存在（先执行 cd web && pnpm install）。"
   exit 0
 fi
 
-echo "[deploy] 检测到推送到 main，正在构建前端…（不影响本次推送结果）"
-if ! ( cd "$WEB" && npm run build ); then
+echo "[deploy] 检测到推送到 main，正在使用 $PKG_MGR 构建前端…（不影响本次推送结果）"
+if ! ( cd "$WEB" && $PKG_MGR run build ); then
   echo "[deploy] 构建失败，已跳过部署，线上保持原版本。"
   exit 0
 fi
