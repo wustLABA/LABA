@@ -62,6 +62,7 @@ const {
   onWheel,
   enterClusterFocus,
   exitClusterFocus,
+  focusNode,
   setMode,
 } = useIntelligenceScene(host)
 
@@ -129,6 +130,30 @@ function labelStyle(id: string) {
   return { transform: `translate(-50%, -160%) translate(${pos.x}px, ${pos.y}px)` }
 }
 
+/**
+ * tooltip 的定位锚点：贴着选中节点的投影位置，并做边界收敛，
+ * 避免贴到视口边缘时被裁切。仅在星团视图下展示。
+ */
+const tooltipStyle = computed(() => {
+  const id = selected.value?.id
+  if (!id) return { display: 'none' }
+  const pos = labelPositions.value[id]
+  if (!pos) return { display: 'none' }
+  const margin = 20
+  const cardW = 340
+  const cardH = 260
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  // 优先放在节点右下方；右侧空间不足则翻到左侧，下方不足则翻到上方
+  let x = pos.x + 28
+  if (x + cardW + margin > vw) x = Math.max(margin, pos.x - cardW - 28)
+  let y = pos.y + 18
+  if (y + cardH + margin > vh) y = Math.max(margin, vh - cardH - margin)
+  return { transform: `translate(${x}px, ${y}px)`, display: 'block' }
+})
+
+/** 点击 tooltip 里的关联节点 → 切换到该概念。 */
+
 watch(() => props.mode, (next) => setMode(next), { immediate: true })
 </script>
 
@@ -169,12 +194,43 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
 
       <template v-if="focusedCluster">
         <p class="intel-canvas__title">{{ focusedTitle }}</p>
-        <p class="intel-canvas__exit-hint">右键或按 Escape 返回星图</p>
+        <p class="intel-canvas__exit-hint">左键拖动旋转 · 中键拖动平移 · 滚轮缩放 · 右键或 Escape 返回星图</p>
         <button ref="exitButton" class="intel-canvas__exit" type="button" @pointerdown.stop @click.stop="closeCluster">
           退出星团视图
         </button>
       </template>
-      <p v-else-if="!selected" class="intel-canvas__hint">拖动旋转 · 滚轮缩放 · 点击星点聚焦</p>
+      <p v-else-if="!selected" class="intel-canvas__hint">左键拖动旋转 · 中键拖动平移 · 滚轮缩放 · 点击星点聚焦</p>
+
+      <!-- 节点 tooltip：名词释义卡片。仅在星团视图下、点选节点后出现 -->
+      <div
+        v-if="focusedCluster && selected"
+        class="intel-tip"
+        role="dialog"
+        :aria-label="`${selected.label} 名词解释`"
+        :style="tooltipStyle"
+        @pointerdown.stop
+        @click.stop
+        @wheel.stop
+      >
+        <p class="intel-tip__eyebrow">
+          {{ selected.clusterId === 'research' ? '深度学习知识星团' : 'AI Agent 知识星团' }}
+        </p>
+        <h3 class="intel-tip__title">{{ selected.label }}</h3>
+        <p v-if="selected.microcopy" class="intel-tip__summary">{{ selected.microcopy }}</p>
+        <p v-if="selected.concept" class="intel-tip__concept">{{ selected.concept }}</p>
+        <div v-if="selected.related && selected.related.length" class="intel-tip__related">
+          <p class="intel-tip__related-label">关联概念</p>
+          <div class="intel-tip__chips">
+            <button
+              v-for="item in selected.related"
+              :key="item.id"
+              type="button"
+              class="intel-tip__chip"
+              @click="focusNode(item.id)"
+            >{{ item.label }}</button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="!focusedCluster" class="intel-canvas__actions">
         <button type="button" data-cluster-id="research" @click="openCluster('research', $event.currentTarget)">进入深度学习知识星团</button>
@@ -213,6 +269,92 @@ watch(() => props.mode, (next) => setMode(next), { immediate: true })
 .intel-canvas__exit-hint { left: clamp(1rem, 3vw, 2rem); bottom: clamp(1rem, 3vw, 2rem); margin: 0; color: color-mix(in srgb, var(--color-snow) 72%, transparent); font-size: var(--text-xs); letter-spacing: .08em; }
 .intel-canvas__exit { top: clamp(1rem, 3vw, 2rem); right: clamp(1rem, 3vw, 2rem); border: 1px solid color-mix(in srgb, var(--color-snow) 48%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--color-text) 54%, transparent); padding: .6rem .85rem; color: var(--color-snow); font: inherit; font-size: var(--text-xs); letter-spacing: .08em; cursor: pointer; }
 .intel-canvas__exit:focus-visible { outline: 2px solid var(--color-snow); outline-offset: 3px; }
+
+/* ── 节点 tooltip ────────────────────────────────────────────────────────
+   玻璃卡片风格，与 Star Map 的深色聚焦背景同调（雪白文字 + 极光蓝描边）。
+   绝对定位在左上原点，由 tooltipStyle 计算 translate 贴合节点投影位置。 */
+.intel-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  inline-size: min(21rem, calc(100vw - 2.5rem));
+  padding: .95rem 1.05rem 1.05rem;
+  border: 1px solid color-mix(in srgb, var(--color-glacier) 42%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-text) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.25);
+  box-shadow:
+    0 18px 48px color-mix(in srgb, var(--color-text) 46%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-snow) 14%, transparent);
+  pointer-events: auto;
+  animation: tip-in .22s ease-out both;
+}
+.intel-tip__eyebrow {
+  margin: 0 0 .3rem;
+  color: color-mix(in srgb, var(--color-aurora) 88%, var(--color-snow));
+  font-family: var(--font-mono);
+  font-size: .58rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.intel-tip__title {
+  margin: 0 0 .45rem;
+  color: var(--color-snow);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.intel-tip__summary {
+  margin: 0 0 .5rem;
+  color: color-mix(in srgb, var(--color-snow) 84%, transparent);
+  font-size: .78rem;
+  line-height: 1.62;
+}
+.intel-tip__concept {
+  margin: 0;
+  padding-top: .5rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-glacier) 20%, transparent);
+  color: color-mix(in srgb, var(--color-snow) 68%, transparent);
+  font-size: .74rem;
+  line-height: 1.78;
+}
+.intel-tip__related { margin-top: .75rem; }
+.intel-tip__related-label {
+  margin: 0 0 .4rem;
+  color: color-mix(in srgb, var(--color-snow) 52%, transparent);
+  font-family: var(--font-mono);
+  font-size: .56rem;
+  letter-spacing: .14em;
+}
+.intel-tip__chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.intel-tip__chip {
+  border: 1px solid color-mix(in srgb, var(--color-aurora) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-aurora) 12%, transparent);
+  padding: .24rem .58rem;
+  color: color-mix(in srgb, var(--color-glacier) 92%, var(--color-snow));
+  font: inherit;
+  font-size: .66rem;
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.intel-tip__chip:hover {
+  border-color: color-mix(in srgb, var(--color-aurora) 72%, transparent);
+  background: color-mix(in srgb, var(--color-aurora) 24%, transparent);
+}
+.intel-tip__chip:focus-visible { outline: 2px solid var(--color-aurora); outline-offset: 2px; }
+
+@keyframes tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intel-tip { animation: none; }
+}
 
 @keyframes label-in { from { opacity: 0; } to { opacity: 1; } }
 

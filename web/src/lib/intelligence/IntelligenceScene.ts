@@ -9,7 +9,7 @@ import {
   LineBasicMaterial,
   LineLoop,
   LineSegments,
-  OrthographicCamera,
+  PerspectiveCamera,
   Points,
   PointsMaterial,
   Scene,
@@ -19,6 +19,7 @@ import {
 } from 'three'
 
 import {
+  NODE_BY_ID,
   buildLayout,
   buildLayoutMobile,
   layoutsForViewport,
@@ -127,6 +128,31 @@ function detectWebGL(): boolean {
   }
 }
 
+/**
+ * 由布局节点构造对外的 HotspotInfo。
+ *
+ * 集中在此处是为了保证 tooltip 所需字段（名词释义 concept、关联节点 related）
+ * 在所有产出路径上一致 —— 拾取、悬停、初始标签列表都走这一个函数，
+ * 避免某条路径漏字段导致 tooltip 空白。
+ */
+function toHotspotInfo(node: NodeLayout, mode: IntelligenceMode): HotspotInfo {
+  const related = (node.related ?? [])
+    .map((id) => {
+      const target = NODE_BY_ID.get(id)
+      return target?.label ? { id, label: target.label } : null
+    })
+    .filter((item): item is { id: string; label: string } => item !== null)
+  return {
+    id: node.id,
+    clusterId: node.clusterId,
+    label: node.label ?? node.id,
+    microcopy: node.microcopy ?? '',
+    mode,
+    concept: node.concept,
+    related,
+  }
+}
+
 export function createIntelligenceScene(
   options: IntelligenceSceneOptions,
 ): IntelligenceSceneApi {
@@ -154,7 +180,7 @@ export function createIntelligenceScene(
   let container: HTMLElement | null = null
   let renderer: WebGLRenderer | null = null
   let scene: Scene | null = null
-  let camera: OrthographicCamera | null = null
+  let camera: PerspectiveCamera | null = null
   let root: Group | null = null
   let primaryPoints: Points | null = null
   let secondaryPoints: Points | null = null
@@ -181,14 +207,62 @@ export function createIntelligenceScene(
   let modeTween: gsap.core.Tween | null = null
   let awakenTween: gsap.core.Tween | null = null
   let focusTween: gsap.core.Tween | null = null
+  /** 退出星团视图时延迟回到全景取景，避免打乱收缩动画。 */
+  let collapseViewTimer: gsap.core.Tween | null = null
   let pulseT = 0
   let sceneT = 0
   let hoveredId: string | null = null
   let focusedHotspot: string | null = null
   let activeClusterId: IntelligenceClusterId | null = null
   const focus = { scale: 1, x: 0, y: 0 }
-  let rotationX = -0.08
-  let rotationY = -0.18
+
+  // ── 3D 漫游轨道（诗云式自由视角）────────────────────────────────────────
+  // 相机贴在以 target 为球心的球面上：spherical(radius, phi, theta)。
+  // 全屏星团视图与首页内联星图共用同一套轨道，只是初始半径不同，
+  // 因此两处都是真 3D —— 区别仅在于聚焦时会把相机推近到星团尺度。
+  //
+  // 取景不变量：visibleH = 2 * radius * tan(fov/2)。
+  // focus.scale 表达「期望可见高度相对 viewH 的倍数」，半径与 FOV
+  // 都从它派生，三者始终自洽（见 updateCameraProjection）。
+  const RADIUS_MIN = 0.22
+  const RADIUS_MAX = 24
+  // 轨道半径基准：把 scale 映射为半径时的参考距离。
+  // 取 1 是因为布局坐标本身就在 ~1 的量级，半径 1 配合 fov 即为「贴脸看」。
+  const RADIUS_UNIT = 1
+  function radiusForScale(scale: number) {
+    return RADIUS_UNIT / Math.max(scale, 0.02)
+  }
+  const orbit = {
+    radius: radiusForScale(1),
+    // 极角：0 = 正上方俯视，Math.PI/2 = 水平正视。
+    // 0.46π 让视角略微俯视，星团的垂直引导线因此呈现为立体纵深而非纯粹的水平线。
+    phi: Math.PI * 0.46,
+    // 方位角必须为 0：双星团沿 X 轴对称分布（-0.72 / +0.72），
+    // 任何非零 theta 都会绕 Y 轴转动整个世界，使两个星团一前一后、
+    // 透视下大小与明暗不对称（曾用 -0.42，导致左侧星团几乎看不见）。
+    // 用户仍可拖动改变 theta，但初始构图必须对称。
+    theta: 0,
+    // 视线中心（相机始终看向这里）
+    tx: 0,
+    ty: 0,
+    tz: 0.33,
+    // 旋转与平移动量，用于松手后的惯性阻尼
+    vTheta: 0,
+    vPhi: 0,
+    vPanX: 0,
+    vPanY: 0,
+  }
+  let momentumActive = false
+  /**
+   * 首帧之前 layout 尚未就绪，此时取景无意义（尺寸还是 1x1）。
+   * 置位后 applySize 才会触发重新取景。
+   */
+  let surfaceReady = false
+  /**
+   * 用户平移的持久偏移，叠加在取景目标之上。
+   * 与 orbit.tx/ty（取景补间的目标）分离，避免两者互相覆盖。
+   */
+  const panOffset = { x: 0, y: 0, z: 0 }
 
   const nodeOrder = buildLayout.nodes.map((n) => n.id)
   const primaryIds = nodeOrder.filter(
@@ -308,6 +382,9 @@ export function createIntelligenceScene(
       label: t < 0.5 ? a.label : b.label,
       hotspot: t < 0.5 ? a.hotspot : b.hotspot,
       microcopy: t < 0.5 ? a.microcopy : b.microcopy,
+      // 释义与关联属于内容而非几何，不参与插值；取切换过半后的那一侧即可
+      concept: t < 0.5 ? a.concept : b.concept,
+      related: t < 0.5 ? a.related : b.related,
     }
   }
 
@@ -315,13 +392,7 @@ export function createIntelligenceScene(
     const source = forMode === 'build' ? activeBuild() : activeUnderstand()
     return source.nodes
       .filter((n) => n.role === 'primary' && n.label)
-      .map((n) => ({
-        id: n.id,
-        clusterId: n.clusterId,
-        label: n.label!,
-        microcopy: n.microcopy ?? '',
-        mode: forMode,
-      }))
+      .map((n) => toHotspotInfo(n, forMode))
   }
 
   function maxDpr() {
@@ -963,44 +1034,109 @@ export function createIntelligenceScene(
     void dt
   }
 
+  /**
+   * 透视取景。
+   *
+   * 设计：可见高度由 viewH * focus.scale 唯一决定，相机距离由轨道半径决定，
+   * FOV 再由此二者反解 —— 三者必须满足 visibleH = 2 * radius * tan(fov/2)。
+   *
+   * 旧实现把 FOV 也 clamp 到 [FOV_MIN, FOV_MAX]，当 flyTo 把半径压到
+   * RADIUS_MIN 时 clamp 生效，等式被破坏，实际可见高度远大于期望值，
+   * 星团因此缩成一小团「跑到一旁」。这里去掉 FOV 的硬 clamp，
+   * 改为只 clamp 半径，让等式恒成立。
+   */
   function updateCameraProjection() {
     if (!camera) return
     const aspect = width / Math.max(height, 1)
+    const r = Math.max(RADIUS_MIN, Math.min(RADIUS_MAX, orbit.radius))
     if (projectionScale === focus.scale && projectionAspect === aspect) return
-    const animatedViewW = viewH * aspect * focus.scale
-    camera.left = -animatedViewW
-    camera.right = animatedViewW
-    camera.top = viewH * focus.scale
-    camera.bottom = -viewH * focus.scale
+    camera.aspect = aspect
+    // 可见高度（世界单位）= 基础取景高度 * scale。
+    // scale 的语义是「相对全场景取景的放大倍数」，>1 表示推近看局部。
+    const visibleH = Math.max(viewH * focus.scale, 0.001)
+    // 由 visibleH = 2 * r * tan(fov/2) 反解 fov，保证取景尺度与 scale 严格对应
+    const fovRad = 2 * Math.atan(visibleH * 0.5 / Math.max(r, 0.001))
+    camera.fov = Math.min(179, Math.max(1, (fovRad * 180) / Math.PI))
     camera.updateProjectionMatrix()
     projectionScale = focus.scale
     projectionAspect = aspect
   }
 
+  /**
+   * 把当前轨道参数写入相机。
+   *
+   * 关键点：这里【不再】把 root.rotation 归零。旧实现在聚焦时刻意将
+   * rotationX/Y 强制为 0（`activeClusterId ? 0 : rotationX`），
+   * 这正是「点了星团就变成平面」的直接原因 —— 3D 被压成了正面平视。
+   * 现在旋转完全由相机轨道承担，root 只做模式位移，几何始终保持立体。
+   */
   function updateCamera() {
     if (!camera || !root) return
     updateCameraProjection()
-    // Full-screen focus starts as a readable front-facing constellation. The
-    // regular field retains its subtle tilt; drag can introduce rotation only
-    // after the focused presentation is already framed.
-    const activeRotationX = activeClusterId ? 0 : rotationX
-    const activeRotationY = activeClusterId ? 0 : rotationY
-    root.rotation.x = activeRotationX
-    root.rotation.y = activeRotationY
-    // Camera and root positions are evaluated together. Translating the root
-    // by the focus target keeps a front-facing orthographic cluster centered.
-    root.position.set(focus.x, focus.y, 0)
-    if (reducedMotion || activeClusterId) {
-      camera.position.x = 0
-      camera.position.y = 0
-      return
+
+    // root 保持单位姿态：立体感来自相机绕行，而非几何旋转，
+    // 这样投影/拾取的数学与渲染始终一致。
+    root.position.set(0, 0, 0)
+    root.rotation.set(0, 0, 0)
+    // 模式切换的轻微位移保留，作为双星团之间的呼吸感
+    root.position.x += (morph - 0.5) * 0.04
+
+    if (reducedMotion) {
+      // Reduced Motion：锁定为稳定的三分之四视角，不做任何运动
+      orbit.phi = Math.PI * 0.46
+      orbit.theta = -0.42
+      orbit.vTheta = 0
+      orbit.vPhi = 0
+    } else {
+      updateMomentum()
+      // 指针视差：极轻微地推近/偏移，制造深度呼吸；不影响轨道本身
+      cameraParallax.x = lerp(cameraParallax.x, pointer.x * 0.012, 0.05)
+      cameraParallax.y = lerp(cameraParallax.y, pointer.y * 0.008, 0.05)
     }
-    // Extremely subtle framing shift only — no orbit / tilt
-    cameraParallax.x = lerp(cameraParallax.x, pointer.x * 0.012, 0.05)
-    cameraParallax.y = lerp(cameraParallax.y, pointer.y * 0.008, 0.05)
-    const modeShift = (morph - 0.5) * 0.018
-    camera.position.x = cameraParallax.x + modeShift
-    camera.position.y = cameraParallax.y
+
+    const sinPhi = Math.sin(orbit.phi)
+    const r = Math.max(RADIUS_MIN, Math.min(RADIUS_MAX, orbit.radius))
+    // 视线中心 = 取景目标 + 用户平移偏移
+    const cx = orbit.tx + panOffset.x
+    const cy = orbit.ty + panOffset.y
+    const cz = orbit.tz + panOffset.z
+    const px = cx + r * sinPhi * Math.sin(orbit.theta) + cameraParallax.x
+    const py = cy + r * Math.cos(orbit.phi) + cameraParallax.y
+    const pz = cz + r * sinPhi * Math.cos(orbit.theta)
+    camera.position.set(px, py, pz)
+    camera.lookAt(cx, cy, cz)
+  }
+
+  /**
+   * 惯性阻尼：松手后动量按 index 衰减继续推进轨道与平移。
+   * 之所以放在渲染循环里而非独立 tween，是为了让它与指针视差、
+   * 模式补间共用同一个时间基准，避免多套动画互相打架。
+   */
+  function updateMomentum() {
+    if (!momentumActive) return
+    const DECAY = 0.92
+    const EPS = 0.00035
+    orbit.theta += orbit.vTheta
+    orbit.phi = Math.max(0.16, Math.min(Math.PI - 0.16, orbit.phi + orbit.vPhi))
+    // 平移动量累加到 panOffset（用户偏移），不触碰取景目标
+    panOffset.x += orbit.vPanX
+    panOffset.y += orbit.vPanY
+    orbit.vTheta *= DECAY
+    orbit.vPhi *= DECAY
+    orbit.vPanX *= DECAY
+    orbit.vPanY *= DECAY
+    if (
+      Math.abs(orbit.vTheta) < EPS &&
+      Math.abs(orbit.vPhi) < EPS &&
+      Math.abs(orbit.vPanX) < EPS &&
+      Math.abs(orbit.vPanY) < EPS
+    ) {
+      orbit.vTheta = 0
+      orbit.vPhi = 0
+      orbit.vPanX = 0
+      orbit.vPanY = 0
+      momentumActive = false
+    }
   }
 
   function renderFrame(dt: number) {
@@ -1043,7 +1179,14 @@ export function createIntelligenceScene(
     renderer.setPixelRatio(maxDpr())
     renderer.setSize(width, height, false)
     projectionScale = -1
+    projectionAspect = -1
     updateCameraProjection()
+    // 尺寸变化会改变 viewH，进而改变取景所需 scale。
+    // 必须重新取景，否则首帧（mount 时尺寸尚为 1x1）算出的 scale 会一直沿用，
+    // 表现为首页星图被裁成一个小点。
+    if (!activeClusterId && !disposed && surfaceReady) {
+      frameView(0)
+    }
   }
 
   function mount(target: HTMLElement) {
@@ -1057,7 +1200,7 @@ export function createIntelligenceScene(
     scene = new Scene()
     scene.background = null
 
-    camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    camera = new PerspectiveCamera(45, 1, 0.05, 100)
     camera.position.set(0, 0, 3)
     camera.lookAt(0, 0, 0)
 
@@ -1088,6 +1231,9 @@ export function createIntelligenceScene(
 
     buildGeometries()
     applySize(container.clientWidth, container.clientHeight)
+    // 几何与尺寸就绪：此后 applySize 可以安全地重新取景
+    surfaceReady = true
+    frameView(0)
     renderFrame(0.016)
     options.onReady?.()
 
@@ -1179,57 +1325,73 @@ export function createIntelligenceScene(
     if (!reducedMotion) ensureLoop()
   }
 
-  /** 滚轮缩放：正值拉远，负值靠近；保留当前聚焦位置作为镜头中心。 */
+  /** 滚轮缩放：正值拉远（可见范围变大），负值靠近。 */
   function zoomBy(delta: number) {
     if (disposed || !Number.isFinite(delta) || delta === 0) return
+    // 缩放的唯一真源是 focus.scale（= 可见高度的倍数）。
+    // 不去动 radius：那里若也参与取景，就会与 FOV 反解互相抵消，
+    // 出现「滚轮没反应」或「越滚越远」的怪象。
     const targetScale = Math.max(
       MIN_VIEW_SCALE,
-      Math.min(MAX_VIEW_SCALE, focus.scale * Math.exp(delta * WHEEL_ZOOM_FACTOR)),
+      Math.min(MAX_VIEW_SCALE, focus.scale * Math.exp(-delta * WHEEL_ZOOM_FACTOR)),
     )
     if (Math.abs(targetScale - focus.scale) < 0.0001) return
     focusTween?.kill()
     focusTween = null
-    if (reducedMotion) {
-      focus.scale = targetScale
-      renderFrame(0)
-      return
-    }
-    // Wheel events arrive in quick succession; update the target immediately so
-    // every tick compounds from the latest zoom level instead of a stale tween.
     focus.scale = targetScale
-    updateCameraProjection()
+    orbit.radius = Math.max(
+      RADIUS_MIN,
+      Math.min(RADIUS_MAX, radiusForScale(targetScale)),
+    )
+    projectionScale = -1
     renderFrame(0)
+    ensureLoop()
   }
 
-  /** 旋转后的坐标（root 仅含 Rx·Ry），用于把节点居中到画面 */
-  function rotatedPoint(x: number, y: number, z: number, out: Vector3) {
-    const cy = Math.cos(rotationY)
-    const sy = Math.sin(rotationY)
-    const cx = Math.cos(rotationX)
-    const sx = Math.sin(rotationX)
-    const x1 = x * cy + z * sy
-    const z1 = -x * sy + z * cy
-    out.set(x1, y * cx - z1 * sx, y * sx + z1 * cx)
-  }
-
-  /** 流畅的相机飞行：gsap 补间聚焦缩放 + 居中偏移（诗云 locate 同款手感） */
-  function flyTo(scale: number, x: number, y: number, duration = 0.95) {
+  /** 取景 = 设定相机到球心距离；透视下由 radius 决定可见范围。 */
+  function flyTo(scale: number, x: number, y: number, duration = 0.95, z?: number) {
     if (disposed) return
     focusTween?.kill()
     focusTween = null
+    // 半径固定在中距离，取景完全由 focus.scale 通过 FOV 控制 ——
+    // 半径若也随 scale 变化，会与 FOV 反解相互抵消，导致缩放失灵。
+    const targetRadius = Math.max(
+      RADIUS_MIN,
+      Math.min(RADIUS_MAX, radiusForScale(1)),
+    )
+    const targetTx = orbit.tx
+    const targetTy = orbit.ty
+    const targetTz = z === undefined ? orbit.tz : z
     if (reducedMotion || duration === 0) {
       focus.scale = scale
       focus.x = x
       focus.y = y
-      // The camera projection cache keys only scale and aspect. Force it to
-      // recalculate when a synchronous full-screen focus changes scale.
+      orbit.radius = targetRadius
+      orbit.tx = x
+      orbit.ty = y
+      orbit.tz = targetTz
       projectionScale = -1
       renderFrame(0)
       return
     }
-    // Apply the destination immediately so the target stays visible while
-    // the frame animation is settling, then use the tween for the motion.
-    const from = { scale: focus.scale, x: focus.x, y: focus.y }
+    const from = {
+      scale: focus.scale,
+      x: focus.x,
+      y: focus.y,
+      radius: orbit.radius,
+      tx: orbit.tx,
+      ty: orbit.ty,
+      tz: orbit.tz,
+    }
+    const to = {
+      scale,
+      x,
+      y,
+      radius: targetRadius,
+      tx: targetTx,
+      ty: targetTy,
+      tz: targetTz,
+    }
     focus.scale = scale
     focus.x = x
     focus.y = y
@@ -1238,47 +1400,137 @@ export function createIntelligenceScene(
     focus.scale = from.scale
     focus.x = from.x
     focus.y = from.y
+    orbit.radius = from.radius
+    orbit.tx = from.tx
+    orbit.ty = from.ty
+    orbit.tz = from.tz
     projectionScale = -1
-    focusTween = gsap.to(focus, {
-      scale,
-      x,
-      y,
+    focusTween = gsap.to(from, {
+      ...to,
       duration,
       ease: 'power2.inOut',
       overwrite: true,
       onUpdate() {
+        focus.scale = from.scale
+        focus.x = from.x
+        focus.y = from.y
+        orbit.radius = from.radius
+        orbit.tx = from.tx
+        orbit.ty = from.ty
+        orbit.tz = from.tz
+        projectionScale = -1
         ensureLoop()
+      },
+      onComplete() {
+        focusTween = null
       },
     })
     ensureLoop()
   }
 
+  /**
+   * 把某个节点居中到画面。
+   *
+   * 在轨道相机下，节点投影位置取决于相机方位，因此不能像旧版那样只取
+   * 世界坐标取负。这里把节点投影到「相机右向量 / 上向量」张成的屏幕平面上，
+   * 求出它在屏幕空间相对视线中心的偏移量，再反向平移 target 抵消该偏移。
+   */
   function flyToNode(id: string, scale: number, duration = 0.95) {
     const idx = nodeOrder.indexOf(id)
-    if (!nodePositions || idx < 0) return
-    rotatedPoint(
-      nodePositions[idx * 3]!,
-      nodePositions[idx * 3 + 1]!,
-      nodePositions[idx * 3 + 2]!,
-      tmpA,
-    )
-    flyTo(scale, -tmpA.x, -tmpA.y, duration)
+    if (!nodePositions) return
+    if (idx < 0) return
+    const nx = nodePositions[idx * 3]!
+    const ny = nodePositions[idx * 3 + 1]!
+    const nz = nodePositions[idx * 3 + 2]!
+
+    // 相机基向量：与 panBy 保持一致，确保平移方向与画面视觉方向对齐
+    const cosPhi = Math.cos(orbit.phi)
+    const sinPhi = Math.sin(orbit.phi)
+    const cosT = Math.cos(orbit.theta)
+    const sinT = Math.sin(orbit.theta)
+    const rightX = cosT
+    const rightY = 0
+    const rightZ = -sinT
+    const upX = -cosPhi * sinT
+    const upY = sinPhi
+    const upZ = -cosPhi * cosT
+
+    // 节点相对当前视线中心的偏移，在屏幕平面上的两个分量
+    const dx = nx - orbit.tx
+    const dy = ny - orbit.ty
+    const dz = nz - orbit.tz
+    const offRight = dx * rightX + dy * rightY + dz * rightZ
+    const offUp = dx * upX + dy * upY + dz * upZ
+
+    flyTo(scale, orbit.tx + offRight, orbit.ty + offUp, duration)
   }
 
+  /**
+   * 内联全场景取景：把「两个星团 + 中间桥」整体放进视口。
+   *
+   * 不能再像旧版那样硬编码 scale=1 —— 透视化之后可见高度 = viewH * scale，
+   * 而双星团在 X 方向跨度约 1.9 世界单位，scale=1 只能看到 0.78 单位，
+   * 结果是首页星图被裁到几乎不可见。这里按实际布局跨度反算 scale。
+   */
   function frameView(duration = 0.95) {
     let anyExpanded = false
     for (const c of clusters.values()) if (c.expanded) anyExpanded = true
-    if (anyExpanded) flyTo(0.85, 0, 0, duration)
-    else flyTo(1, 0, 0, duration)
+
+    // 取两个核心 + 各自节点的整体包围盒（模式下切换到当前布局）
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    const t = smoothstep(morph)
+    // 始终把全部节点（含未展开星团的成员）纳入包围盒：
+    // 未展开的星团节点仍然以暗淡光点常驻显示，若把它们排除，
+    // 取景会过近，边缘星点会被裁到视口之外。
+    for (const node of (morph < 0.5 ? activeBuild() : activeUnderstand()).nodes) {
+      const p = layoutAt(node.id, t).position
+      minX = Math.min(minX, p.x)
+      maxX = Math.max(maxX, p.x)
+      minY = Math.min(minY, p.y)
+      maxY = Math.max(maxY, p.y)
+    }
+    if (!Number.isFinite(minX)) {
+      flyTo(anyExpanded ? 0.85 : 1, 0, 0, duration)
+      return
+    }
+    const halfW = Math.max(0.001, (maxX - minX) * 0.5)
+    const halfH = Math.max(0.001, (maxY - minY) * 0.5)
+    const aspect = width / Math.max(height, 1)
+    // padding 决定星团相对视口的占比。
+    // 双核间距为 1.44 世界单位（-0.72 / +0.72），但要给「核心 → 外围节点」
+    // 的整团跨度留位置，因此按完整包围盒（含外围节点）取景。
+    // 系数偏大一点（1.45）让星团不要顶到视口边缘 —— 顶边会削弱
+    // 「两团星 + 中间桥」的构图，也让核心点难以点击。
+    const padding = anyExpanded ? 1.35 : 1.45
+    const scale = Math.max(
+      0.35,
+      Math.min(
+        24,
+        Math.max(
+          (2 * halfH * padding) / Math.max(viewH, 0.001),
+          (2 * halfW * padding) / Math.max(viewH * aspect, 0.001),
+        ),
+      ),
+    )
+    const cx = (minX + maxX) * 0.5
+    const cy = (minY + maxY) * 0.5
+    const cz = 0.33
+    flyTo(scale, cx, cy, duration, cz)
   }
 
-  /** Frame one constellation using its current rotated layout bounds. */
+  /**
+   * 为单个星团取景：把该星团在【相机屏幕平面】上的包围盒映射到视口。
+   *
+   * 旧版直接把世界坐标当作屏幕坐标（focusRotation 恒为 0），在相机固定
+   * 正视时勉强成立；一旦相机可在轨道上自由移动，该假设失效。这里改为
+   * 用当前相机的 right / up 基向量把节点投影到屏幕平面求包围盒，
+   * 因此任意视角下取景都正确。
+   */
   function frameCluster(cluster: ClusterState, duration = 0.95) {
     if (!nodePositions || !camera) return
-    // Full-screen focus renders front-facing, so measure in that same space
-    // instead of the inline field's tilted root orientation.
-    const focusRotationX = 0
-    const focusRotationY = 0
     const points = [cluster.coreIdx, ...cluster.nodeIdxs]
     // The node spring positions were calculated in the smaller inline field.
     // Snap the selected cluster to its layout before measuring overlay bounds.
@@ -1289,53 +1541,77 @@ export function createIntelligenceScene(
       nodePositions[idx * 3 + 2] = node.position.z
       nodeVel?.fill(0, idx * 3, idx * 3 + 3)
     }
+
+    // 相机屏幕平面基向量（与 panBy / flyToNode 使用同一套定义）
+    const cosPhi = Math.cos(orbit.phi)
+    const sinPhi = Math.sin(orbit.phi)
+    const cosT = Math.cos(orbit.theta)
+    const sinT = Math.sin(orbit.theta)
+    const rightX = cosT
+    const rightZ = -sinT
+    const upX = -cosPhi * sinT
+    const upY = sinPhi
+    const upZ = -cosPhi * cosT
+    // 视线方向（用于剔除深度，避免把背面的节点算进包围盒导致取景过远）
+    const fwdX = sinPhi * sinT
+    const fwdY = cosPhi
+    const fwdZ = sinPhi * cosT
+
     let minX = Infinity
     let maxX = -Infinity
     let minY = Infinity
     let maxY = -Infinity
 
-    for (const idx of points) {
-      // Frame against the active layout rather than the spring buffer. The
-      // buffer is updated again during the same render after a Teleport resize,
-      // while layout coordinates remain the stable source of truth.
-      const node = layoutAt(nodeOrder[idx]!, smoothstep(morph)).position
-      const cy = Math.cos(focusRotationY)
-      const sy = Math.sin(focusRotationY)
-      const cx = Math.cos(focusRotationX)
-      const sx = Math.sin(focusRotationX)
-      const x1 = node.x * cy + node.z * sy
-      const z1 = -node.x * sy + node.z * cy
-      const rotatedX = x1
-      const rotatedY = node.y * cx - z1 * sx
-      minX = Math.min(minX, rotatedX)
-      maxX = Math.max(maxX, rotatedX)
-      minY = Math.min(minY, rotatedY)
-      maxY = Math.max(maxY, rotatedY)
+    // 先求星团在世界坐标中的真实中心，围绕它度量跨度。
+    // 若以 orbit.tx/ty 为原点，一旦相机已被平移过，包围盒就会含入
+    // 中心到星团的偏移量，算出的跨度虚大 → 取景过远 → 星团缩成小点。
+    const pts = points.map((idx) => layoutAt(nodeOrder[idx]!, smoothstep(morph)).position)
+    let cxs = 0
+    let cys = 0
+    let czs = 0
+    for (const p of pts) {
+      cxs += p.x
+      cys += p.y
+      czs += p.z
+    }
+    const n = Math.max(pts.length, 1)
+    const ccx = cxs / n
+    const ccy = cys / n
+    const ccz = czs / n
+
+    for (const p of pts) {
+      const dx = p.x - ccx
+      const dy = p.y - ccy
+      const dz = p.z - ccz
+      const sx = dx * rightX + dz * rightZ
+      const sy = dx * upX + dy * upY + dz * upZ
+      // 深度加权：背向相机的节点在透视下更小，按比例折算到屏幕跨度
+      const depth = dx * fwdX + dy * fwdY + dz * fwdZ
+      const persp = orbit.radius / Math.max(orbit.radius + depth, orbit.radius * 0.35)
+      minX = Math.min(minX, sx * persp)
+      maxX = Math.max(maxX, sx * persp)
+      minY = Math.min(minY, sy * persp)
+      maxY = Math.max(maxY, sy * persp)
     }
     if (!Number.isFinite(minX) || !Number.isFinite(minY)) return
 
     const halfWidth = Math.max(0.001, (maxX - minX) * 0.5)
     const halfHeight = Math.max(0.001, (maxY - minY) * 0.5)
     const aspect = width / Math.max(height, 1)
-    // Frame from both projected axes. The prior vertical-only calculation hit
-    // the minimum scale on wide displays, making the focused constellation
-    // look like a thin, distant line across the viewport.
-    const padding = 1.3
-    const scale = Math.max(
-      MIN_VIEW_SCALE,
-      Math.min(
-        0.58,
-        Math.max(
-          (halfWidth * padding) / Math.max(viewH * aspect, 0.001),
-          (halfHeight * padding) / Math.max(viewH, 0.001),
-        ),
-      ),
+    const padding = 1.35
+    // scale 语义 = 放大倍数：可见高度 = viewH * scale。
+    // 要让半高 halfHeight 恰好落在可见半高的 1/padding 处：
+    //   viewH * scale * 0.5 = halfHeight * padding  →  scale = 2*halfHeight*padding/viewH
+    // 宽度方向同理再除以 aspect。取两者较大值（更保守 = 更远）。
+    const neededScale = Math.max(
+      (2 * halfHeight * padding) / Math.max(viewH, 0.001),
+      (2 * halfWidth * padding) / Math.max(viewH * aspect, 0.001),
     )
-    const centerX = (minX + maxX) * 0.5
-    const centerY = (minY + maxY) * 0.5
-    // Root translation moves geometry in the same direction, so offset by the
-    // inverse midpoint to align the selected cluster with the viewport.
-    flyTo(scale, -centerX, -centerY, duration)
+    // 上限放宽到 24，否则小尺度星团（跨度仅约 0.3 世界单位）无法被推近到铺满视口
+    const scale = Math.max(0.35, Math.min(24, neededScale))
+    // 视线中心落在星团质心上（世界坐标）。panOffset 由 updateCamera 叠加，
+    // 因此这里只给取景目标，不需要把用户偏移算进来。
+    flyTo(scale, ccx, ccy, duration, ccz)
   }
 
   function expandCluster(cluster: ClusterState) {
@@ -1400,13 +1676,7 @@ export function createIntelligenceScene(
       if (distance < threshold && distance < bestDist) {
         bestDist = distance
         best = {
-          info: {
-            id: n.id,
-            clusterId: n.clusterId,
-            label: n.label!,
-            microcopy: n.microcopy ?? '',
-            mode: m,
-          },
+          info: toHotspotInfo(n, m),
           isPrimary,
         }
       }
@@ -1428,24 +1698,56 @@ export function createIntelligenceScene(
     if (disposed) return
     const hit = pick(nx, ny)
     if (!hit) {
-      // 点击空白：取消选中并回到取景（已展开的星团保持展开）
+      // 点击空白：取消节点选中。
+      // 关键修正：在全屏星团视图（activeClusterId 非空）下【不能】调用
+      // frameView() —— 那是按整个双星团布局取景的，会让当前星团缩到一旁。
+      // 聚焦态下只清除节点高亮，保持星团聚光灯构图不变。
       focusedHotspot = null
       options.onHotspotChange?.(null)
-      frameView()
+      if (activeClusterId) {
+        const active = clusters.get(activeClusterId)
+        if (active) frameCluster(active)
+      } else {
+        frameView()
+      }
       ensureLoop()
       return
     }
 
     if (hit.isPrimary) {
-      if (activeClusterId) return
-      options.onClusterActivate?.(hit.info.clusterId)
-      return
+      if (activeClusterId) {
+        // 已在星团视图内：核心节点也应当可查看释义（此前这里直接 return，
+        // 导致点核心点没有任何反馈，tooltip 永远不出现）。
+        focusedHotspot = hit.info.id
+        options.onHotspotChange?.(hit.info)
+      } else {
+        // 内联视图：点击核心 → 进入该星团
+        options.onClusterActivate?.(hit.info.clusterId)
+        return
+      }
     } else {
-      // 点击小节点 → 流畅放大并聚焦过去，名称显示在节点上方
+      // 点击小节点 → 选中并展示释义，同时轻微推近
       focusedHotspot = hit.info.id
       options.onHotspotChange?.(hit.info)
-      flyToNode(hit.info.id, 0.5)
+      // 星团视图内已处于推近状态，不再重复飞行，避免视角被打断
+      if (!activeClusterId) flyToNode(hit.info.id, 0.5)
     }
+    ensureLoop()
+  }
+
+  /**
+   * 按 id 精确选中并飞向节点。供 tooltip 的关联节点跳转使用 ——
+   * 关联跳转必须命中，不依赖节点是否恰好落在拾取半径内。
+   */
+  function selectNodeById(id: string) {
+    if (disposed) return
+    const source = morph < 0.5 ? activeBuild() : activeUnderstand()
+    const m: IntelligenceMode = morph < 0.5 ? 'build' : 'understand'
+    const target = source.nodes.find((n) => n.id === id)
+    if (!target) return
+    focusedHotspot = id
+    options.onHotspotChange?.(toHotspotInfo(target, m))
+    flyToNode(id, target.role === 'primary' ? 0.6 : 0.5)
     ensureLoop()
   }
 
@@ -1483,6 +1785,12 @@ export function createIntelligenceScene(
     }
     options.onHoverChange?.(null)
     options.onHotspotChange?.(null)
+    // 进入星团时重置用户平移，保证初始构图一定居中（否则沿用上次的偏移）
+    panOffset.x = 0
+    panOffset.y = 0
+    panOffset.z = 0
+    orbit.vPanX = 0
+    orbit.vPanY = 0
     const active = clusters.get(clusterId)
     if (active) frameCluster(active, 0)
     // `frameCluster()` updates the focus target. Render synchronously only
@@ -1497,17 +1805,93 @@ export function createIntelligenceScene(
     activeClusterId = null
     focusedHotspot = null
     hoveredId = null
+    panOffset.x = 0
+    panOffset.y = 0
+    panOffset.z = 0
+    orbit.vPanX = 0
+    orbit.vPanY = 0
     for (const cluster of clusters.values()) collapseCluster(cluster)
     options.onHoverChange?.(null)
     options.onHotspotChange?.(null)
-    frameView()
+    // 关键修正：旧实现立刻 frameView() 把镜头拉回全景，收缩动画被镜头切换
+    // 覆盖，观感等同于「节点直接消失」。现在让收缩动画先跑完再回到全景取景，
+    // 使退出与进入形成对称的可感知过程。
+    if (reducedMotion) {
+      frameView(0)
+    } else {
+      collapseViewTimer?.kill()
+      collapseViewTimer = gsap.delayedCall(GUIDE_FADE, () => {
+        collapseViewTimer = null
+        if (!disposed && !activeClusterId) frameView(0.95)
+      })
+    }
     ensureLoop()
   }
 
+  /**
+   * 左键拖动 → 相机绕球面公转（真正的 3D 视角移动）。
+   * 注意：这里改的是轨道角度，不是 root 的旋转 —— 前者改变观察方向，
+   * 后者只是转动物体，透视关系完全不同。
+   */
   function rotateBy(dx: number, dy: number) {
     if (reducedMotion) return
-    rotationY += dx * 1.25
-    rotationX = Math.max(-0.65, Math.min(0.65, rotationX + dy * 0.85))
+    const dTheta = dx * 1.35
+    const dPhi = dy * 1.1
+    orbit.theta += dTheta
+    orbit.phi = Math.max(0.16, Math.min(Math.PI - 0.16, orbit.phi + dPhi))
+    // 记录动量，供松手后惯性衰减
+    orbit.vTheta = dTheta
+    orbit.vPhi = dPhi
+    momentumActive = true
+    ensureLoop()
+  }
+
+  /**
+   * 中键 / 右键拖动 → 沿相机屏幕平面平移视线中心（3D 漫游平移）。
+   *
+   * 平移写入独立的 panOffset，而不是直接改 orbit.tx/ty —— 后者是
+   * flyTo 补间的目标值，补间每帧都会把它覆盖回取景中心，导致平移
+   * 只能产生一帧的位移（表现为「中键几乎不动」）。
+   */
+  function panBy(dx: number, dy: number) {
+    if (reducedMotion) return
+    // 屏幕平面基向量：right 永远水平，up 由当前极角决定
+    const cosPhi = Math.cos(orbit.phi)
+    const sinPhi = Math.sin(orbit.phi)
+    const cosT = Math.cos(orbit.theta)
+    const sinT = Math.sin(orbit.theta)
+    const rightX = cosT
+    const rightZ = -sinT
+    const upX = -cosPhi * sinT
+    const upY = sinPhi
+    const upZ = -cosPhi * cosT
+    // 平移幅度与当前可见高度成正比 → 任意缩放下手感一致。
+    // 系数 0.35：拖过整个视口宽度约移动「可见宽度」的三分之一，
+    // 手感接近地图拖拽；过大（如 1.0）会让星团瞬间飞出画面。
+    const k = Math.max(viewH * focus.scale, 0.05) * 0.35
+    const dPanX = (-dx * rightX + dy * upX) * k
+    const dPanY = dy * upY * k
+    const dPanZ = (-dx * rightZ + dy * upZ) * k
+    panOffset.x += dPanX
+    panOffset.y += dPanY
+    panOffset.z += dPanZ
+    orbit.vPanX = dPanX
+    orbit.vPanY = dPanY
+    momentumActive = true
+    ensureLoop()
+  }
+
+  /** 指针抬起：启动惯性衰减（在渲染循环中推进）。 */
+  function releaseMomentum() {
+    if (reducedMotion) {
+      orbit.vTheta = 0
+      orbit.vPhi = 0
+      orbit.vPanX = 0
+      orbit.vPanY = 0
+      momentumActive = false
+      return
+    }
+    momentumActive = true
     ensureLoop()
   }
 
@@ -1663,8 +2047,11 @@ export function createIntelligenceScene(
     enterClusterFocus,
     exitClusterFocus,
     selectAt,
+    selectNodeById,
     hoverAt,
     rotateBy,
+    panBy,
+    releaseMomentum,
     clearSelection,
     setVisible,
     setAwake,

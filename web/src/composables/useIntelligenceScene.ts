@@ -1,7 +1,7 @@
 import { useIntersectionObserver, useResizeObserver } from '@vueuse/core'
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 
-import { buildLayout, understandLayout } from '../lib/intelligence/layouts'
+import { NODE_BY_ID, buildLayout, understandLayout } from '../lib/intelligence/layouts'
 import {
   createIntelligenceScene,
   resolvePerformanceTier,
@@ -23,6 +23,13 @@ function labelsForMode(mode: IntelligenceMode): HotspotInfo[] {
       clusterId: n.clusterId,
       label: n.label!,
       microcopy: n.microcopy ?? '',
+      concept: n.concept,
+      related: (n.related ?? [])
+        .map((id) => {
+          const target = NODE_BY_ID.get(id)
+          return target?.label ? { id, label: target.label } : null
+        })
+        .filter((item): item is { id: string; label: string } => item !== null),
       mode,
     }))
 }
@@ -45,6 +52,10 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   let pointerDown: { x: number; y: number } | null = null
   let pointerId: number | null = null
   let isDragging = false
+  /** 退出星团视图的延迟定时器，等待收缩动画播完。 */
+  let exitTimer = 0
+  /** 左键 = orbit（轨道旋转）；中键 / 右键 = pan（平移视角）。 */
+  let dragMode: 'orbit' | 'pan' = 'orbit'
 
   function syncLabels() {
     const api = sceneApi.value
@@ -132,7 +143,19 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   }
 
   function onPointerDown(event: PointerEvent) {
-    if (event.pointerType === 'mouse' && event.button !== 0) return
+    // 中键 / 右键 = 3D 平移视角；左键 = 轨道旋转。两者共用同一套指针状态机，
+    // 用 dragMode 区分，避免同时触发旋转与平移。
+    if (event.pointerType === 'mouse' && event.button === 1) {
+      dragMode = 'pan'
+      // 中键默认会在 Windows 上触发自动滚动，必须阻止
+      event.preventDefault()
+    } else if (event.pointerType === 'mouse' && event.button === 2) {
+      dragMode = 'pan'
+    } else if (event.pointerType === 'mouse' && event.button !== 0) {
+      return
+    } else {
+      dragMode = 'orbit'
+    }
     if (pointerId !== null) return
     pointerId = event.pointerId
     pointerDown = { x: event.clientX, y: event.clientY }
@@ -148,14 +171,17 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     const dy = (event.clientY - pointerDown.y) / Math.max(host.clientHeight, 1)
     if (Math.abs(dx) + Math.abs(dy) > 0.008) isDragging = true
     if (isDragging) {
-      sceneApi.value?.rotateBy(dx, dy)
+      if (dragMode === 'pan') sceneApi.value?.panBy(dx, dy)
+      else sceneApi.value?.rotateBy(dx, dy)
       pointerDown = { x: event.clientX, y: event.clientY }
     }
   }
 
   function finishPointer(event?: PointerEvent, select = false) {
     const host = canvasHost.value
-    if (select && host && pointerDown && event && !isDragging) {
+    // 平移 / 旋转结束都交给惯性衰减，形成诗云式的顺滑收尾
+    if (isDragging) sceneApi.value?.releaseMomentum()
+    if (select && host && pointerDown && event && !isDragging && dragMode === 'orbit') {
       const rect = host.getBoundingClientRect()
       const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1
       const ny = -(((event.clientY - rect.top) / rect.height) * 2 - 1)
@@ -168,6 +194,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     pointerDown = null
     pointerId = null
     isDragging = false
+    dragMode = 'orbit'
   }
 
   function onPointerUp(event: PointerEvent) {
@@ -201,18 +228,37 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     scheduleLabelSync()
   }
 
+  /**
+   * 退出星团视图。
+   *
+   * 关键：不能立刻把 activeClusterId 置空 —— 那会让 Teleport 马上把画布
+   * 交还给内联小容器，收缩动画转而在那个几乎不可见的尺寸里播放，
+   * 用户看到的就是「节点直接消失」。
+   * 这里让画布维持全屏直到收缩动画播完（与 IntelligenceScene 的
+   * GUIDE_FADE 时长对齐），再真正退出全屏。
+   */
+  const EXIT_COLLAPSE_MS = 1200
+
   function exitClusterFocus() {
+    if (!activeClusterId.value) return
     sceneApi.value?.exitClusterFocus()
-    activeClusterId.value = null
-    requestAnimationFrame(() => {
-      // After Teleport returns the host, the observer's last inline sample is
-      // authoritative again. This preserves the normal offscreen RAF pause.
-      isSectionVisible.value = inlineVisible
-      sceneApi.value?.setVisible(inlineVisible)
-    })
-    primaryLabels.value = labelsForMode(mode.value)
+    // 立刻隐藏 tooltip / 选中态，避免卡片悬停在正在收缩的节点上
     hotspot.value = null
     hovered.value = null
+    if (exitTimer) window.clearTimeout(exitTimer)
+    exitTimer = window.setTimeout(() => {
+      exitTimer = 0
+      activeClusterId.value = null
+      requestAnimationFrame(() => {
+        // After Teleport returns the host, the observer's last inline sample is
+        // authoritative again. This preserves the normal offscreen RAF pause.
+        isSectionVisible.value = inlineVisible
+        sceneApi.value?.setVisible(inlineVisible)
+      })
+      primaryLabels.value = labelsForMode(mode.value)
+      scheduleLabelSync()
+    }, prefersReducedMotion.value ? 0 : EXIT_COLLAPSE_MS)
+    primaryLabels.value = labelsForMode(mode.value)
     pointerDown = null
     pointerId = null
     isDragging = false
@@ -222,6 +268,15 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
   function clearSelection() {
     sceneApi.value?.clearSelection()
     hotspot.value = null
+  }
+
+  /**
+   * 从 tooltip 的关联节点跳转：选中并飞向该节点。
+   * 走 selectNodeById 而不是坐标拾取，是因为关联跳转必须精确命中，
+   * 不能依赖节点当前是否落在拾取阈值内。
+   */
+  function focusNode(id: string) {
+    sceneApi.value?.selectNodeById(id)
   }
 
   function onPointerLeave() {
@@ -287,6 +342,7 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
 
   onBeforeUnmount(() => {
     if (labelRaf) cancelAnimationFrame(labelRaf)
+    if (exitTimer) window.clearTimeout(exitTimer)
     activeClusterId.value = null
     sceneApi.value?.dispose()
     sceneApi.value = null
@@ -313,5 +369,6 @@ export function useIntelligenceScene(canvasHost: Ref<HTMLElement | null>) {
     enterClusterFocus,
     exitClusterFocus,
     clearSelection,
+    focusNode,
   }
 }
