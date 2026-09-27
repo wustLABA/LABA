@@ -132,47 +132,60 @@ const micro = { label: '双星图', copy: '科研与工作，两条路径在这�
   overflow: hidden;
   border-radius: 0;
   isolation: isolate;
-  /* One wide atmosphere layer: the field, not the canvas, owns the fade. */
+  /*
+   * 深空底色 —— 这一层决定画布背后是「夜空」还是「一团灰雾」。
+   *
+   * 旧实现用两个极大的椭圆径向渐变（58%×68% + 86%×78%）叠加，中心是
+   * text/success 混出的墨绿。大椭圆 + 软 mask 的结果是一块没有边界的
+   * 弥散灰斑：既不像宇宙，也压不住上面的星点。
+   *
+   * 现在的做法是「中央深、外圈快速透明」，但把椭圆拉宽到接近整个视口、
+   * 并把 success 的混入比例压低 —— 之前 42% 的 success 让中心明显偏墨绿，
+   * 与站内冷蓝基调不符。
+   */
   background:
     radial-gradient(
-      ellipse 58% 68% at 50% 50%,
-      color-mix(in srgb, var(--color-text) 46%, var(--color-success)) 0%,
-      color-mix(in srgb, var(--color-text) 62%, var(--color-success)) 38%,
-      color-mix(in srgb, var(--color-mountain) 32%, transparent) 66%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse 86% 78% at 50% 52%,
-      color-mix(in srgb, var(--color-glacier) 34%, transparent),
-      transparent 100%
+      ellipse 62% 62% at 50% 50%,
+      color-mix(in srgb, var(--color-text) 68%, var(--color-mountain)) 0%,
+      color-mix(in srgb, var(--color-text) 50%, var(--color-mountain)) 40%,
+      color-mix(in srgb, var(--color-text) 22%, var(--color-mountain)) 66%,
+      transparent 86%
     );
   mask-image: radial-gradient(
-    ellipse 70% 76% at 50% 50%,
+    ellipse 76% 76% at 50% 50%,
     #000 0%,
-    #000 40%,
-    rgb(0 0 0 / 0.84) 58%,
-    rgb(0 0 0 / 0.3) 72%,
-    transparent 88%
+    #000 46%,
+    rgb(0 0 0 / 0.7) 66%,
+    rgb(0 0 0 / 0.22) 82%,
+    transparent 94%
   );
   -webkit-mask-image: radial-gradient(
-    ellipse 70% 76% at 50% 50%,
+    ellipse 76% 76% at 50% 50%,
     #000 0%,
-    #000 40%,
-    rgb(0 0 0 / 0.84) 58%,
-    rgb(0 0 0 / 0.3) 72%,
-    transparent 88%
+    #000 46%,
+    rgb(0 0 0 / 0.7) 66%,
+    rgb(0 0 0 / 0.22) 82%,
+    transparent 94%
   );
 }
 
+/*
+ * 极光色晕 —— 压在深空底色之上，给星图两个「引力中心」着上冷暖。
+ * 位置对齐左右两颗核心（约 24% 与 76%），而不是居中铺满，
+ * 这样色晕会包裹核心形成星云感，而不是把整块区域染成一片脏灰。
+ */
 .intelligence__haze {
   position: absolute;
   inset: -8% -4%;
   background:
-    radial-gradient(ellipse at 28% 45%, color-mix(in srgb, var(--color-aurora) 22%, transparent), transparent 52%),
-    radial-gradient(ellipse at 72% 55%, color-mix(in srgb, var(--color-glacier) 50%, transparent), transparent 58%),
-    radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--color-stream) 18%, transparent), transparent 45%);
+    radial-gradient(ellipse 30% 42% at 25% 50%, color-mix(in srgb, var(--color-aurora) 30%, transparent), transparent 68%),
+    radial-gradient(ellipse 30% 42% at 75% 50%, color-mix(in srgb, var(--color-stream) 26%, transparent), transparent 68%),
+    radial-gradient(ellipse 46% 40% at 50% 88%, color-mix(in srgb, var(--color-glacier) 20%, transparent), transparent 72%);
   pointer-events: none;
   z-index: 0;
+  /* 让色晕只在中部显现，避免上下边缘出现横向色带 */
+  mask-image: radial-gradient(ellipse 74% 66% at 50% 48%, #000 36%, transparent 92%);
+  -webkit-mask-image: radial-gradient(ellipse 74% 66% at 50% 48%, #000 36%, transparent 92%);
 }
 
 .intelligence__grid {

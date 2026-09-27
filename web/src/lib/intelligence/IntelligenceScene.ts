@@ -64,6 +64,17 @@ const BRIDGE_SEGMENTS = 24
 const MIN_VIEW_SCALE = 0.36
 const MAX_VIEW_SCALE = 1.2
 const WHEEL_ZOOM_FACTOR = 0.0012
+/**
+ * 内联视图下次级星点的不透明度下限。
+ * 让首页在未展开时也能看到星团的结构，而不是两个孤立白点。
+ * 取值偏低的理由见 updateNodes 中的注释。
+ */
+const INLINE_NODE_FLOOR = 0.34
+/**
+ * 内联视图下指引线的不透明度下限，让首页能看到星团内部的连接结构。
+ * 比星点更低：连线是辅助信息，清晰度不能盖过节点本身。
+ */
+const INLINE_GUIDE_FLOOR = 0.22
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -110,6 +121,65 @@ function createSoftPointTexture(): Texture {
   ctx.clearRect(0, 0, size, size)
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, size, size)
+  const texture = new Texture(canvas)
+  texture.needsUpdate = true
+  return texture
+}
+
+/**
+ * 核心光晕贴图 —— 与 createSoftPointTexture 的区别在于「外圈更宽、中心更实」。
+ *
+ * 星点用 soft point 即可，但核心需要「有质量的球体感」：中心必须迅速达到纯白，
+ * 否则加大尺寸后会变成一团糊开的淡雾。这里把 0→0.3 区段压成接近实心，
+ * 0.3→1 再拉出长尾衰减，叠加后就是「亮核 + 外晕」的层次。
+ */
+function createCoreGlowTexture(): Texture {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128)
+  g.addColorStop(0, 'rgba(255,255,255,1)')
+  g.addColorStop(0.12, 'rgba(252,253,254,0.98)')
+  g.addColorStop(0.26, 'rgba(232,244,255,0.72)')
+  g.addColorStop(0.44, 'rgba(160,208,255,0.34)')
+  g.addColorStop(0.66, 'rgba(110,178,250,0.12)')
+  g.addColorStop(0.85, 'rgba(78,165,245,0.035)')
+  g.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.clearRect(0, 0, size, size)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, size, size)
+  const texture = new Texture(canvas)
+  texture.needsUpdate = true
+  return texture
+}
+
+/**
+ * 柔边细环贴图 —— 用于核心赤道环与星云颗粒。
+ *
+ * 直接在 LineBasicMaterial 上画圆会有明显锯齿（WebGL 默认线宽恒为 1px 且不可调），
+ * 改用「圆环贴图 sprite」来获得可控粗细与柔和边缘。中心透明、边缘 1px 处才起色，
+ * 因此它表现为一个空心圆环而不是实心圆。
+ */
+function createRingTexture(): Texture {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, size, size)
+  ctx.beginPath()
+  // 0.86 → 0.95 之间的窄环带：偏移出画布会被裁掉，故留出外缘余量
+  ctx.arc(128, 128, 116, 0, Math.PI * 2)
+  ctx.lineWidth = 5
+  ctx.strokeStyle = 'rgba(180,222,255,0.85)'
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(128, 128, 116, 0, Math.PI * 2)
+  ctx.lineWidth = 12
+  ctx.strokeStyle = 'rgba(121,190,255,0.16)'
+  ctx.stroke()
   const texture = new Texture(canvas)
   texture.needsUpdate = true
   return texture
@@ -188,6 +258,12 @@ export function createIntelligenceScene(
   let guideLines: LineSegments | null = null
   let bridgeLines: Line | null = null
   let hazePoints: Points | null = null
+  /** 核心光晕层：每个主节点一个 sprite，负责「亮核 → 外晕」的层次 */
+  let coreGlow: Points | null = null
+  /** 核心赤道环层：用环贴图 sprite 代替线环，获得可控粗细与柔边 */
+  let coreRings: Points | null = null
+  /** 装饰性微星尘：填充星团之间的空黑，不参与拾取 */
+  let dustPoints: Points | null = null
 
   let nodePositions: Float32Array | null = null
   let nodeColors: Float32Array | null = null
@@ -204,6 +280,8 @@ export function createIntelligenceScene(
   let bridgeColors: Float32Array | null = null
 
   let pointTexture: Texture | null = null
+  let coreGlowTexture: Texture | null = null
+  let ringTexture: Texture | null = null
   let modeTween: gsap.core.Tween | null = null
   let awakenTween: gsap.core.Tween | null = null
   let focusTween: gsap.core.Tween | null = null
@@ -458,6 +536,8 @@ export function createIntelligenceScene(
     secondaryCol = new Float32Array(secondaryIds.length * 3)
 
     pointTexture = createSoftPointTexture()
+    coreGlowTexture = createCoreGlowTexture()
+    ringTexture = createRingTexture()
 
     const primaryGeo = new BufferGeometry()
     primaryGeo.setAttribute('position', new BufferAttribute(primaryPos, 3))
@@ -529,12 +609,54 @@ export function createIntelligenceScene(
     )
     root.add(ambientPoints)
 
-    const hazeCount = tier === 'reduced' ? 10 : 20
+    // ── 微星尘 ──
+    // 比 ambientPoints 更细、更密、更暗的一层，铺在星团下方。
+    // 作用不是「显示信息」，而是消除大片空黑造成的空洞感 ——
+    // 只靠 40 个语义节点，星团之间会显得很空，观感偏「示意图」而非「星图」。
+    // 因此这层用纯装饰性随机点，不参与拾取、不随模式变化。
+    const dustCount = tier === 'reduced' ? 90 : tier === 'balanced' ? 190 : 300
+    const dustPos = new Float32Array(dustCount * 3)
+    for (let i = 0; i < dustCount; i++) {
+      // 集中在双核连线的水平带内，z 轴铺开以形成纵深
+      dustPos[i * 3] = (Math.random() * 2 - 1) * 1.5
+      dustPos[i * 3 + 1] = (Math.random() * 2 - 1) * 0.62
+      dustPos[i * 3 + 2] = -1.6 + Math.random() * 1.5
+    }
+    const dustGeo = new BufferGeometry()
+    dustGeo.setAttribute('position', new BufferAttribute(dustPos, 3))
+    dustPoints = new Points(
+      dustGeo,
+      new PointsMaterial({
+        map: pointTexture,
+        color: COLOR.glacier,
+        size: tier === 'reduced' ? 1.6 : 2.1,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.3,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      }),
+    )
+    dustPoints.frustumCulled = false
+    root.add(dustPoints)
+
+    // ── 星云雾层 ──
+    // 旧实现用 sizeAttenuation:false + size:64（固定 64 屏幕像素），20 个雾点
+    // 在 1104px 宽的画布上必然连成一片灰色贴纸，把星点全盖住。
+    //
+    // 改为开启 sizeAttenuation 后必须重新标定 size：它现在是世界单位，
+    // 且近处雾点（z≈-0.3）会被透视显著放大。0.95 会让近层膨成巨大的白色
+    // 棉花团并互相叠加过曝，因此取 0.16 量级 —— 雾点的作用是「底噪般的
+    // 薄雾」，不是可视的球体。不透明度也相应从 0.5 降到 0.16。
+    const hazeCount = tier === 'reduced' ? 26 : 52
     const hazePos = new Float32Array(hazeCount * 3)
     for (let i = 0; i < hazeCount; i++) {
-      hazePos[i * 3] = (Math.random() * 2 - 1) * 1.15
-      hazePos[i * 3 + 1] = (Math.random() * 2 - 1) * 0.48
-      hazePos[i * 3 + 2] = -0.55 - Math.random() * 0.25
+      // 分三层纵深：近层大而淡、远层小而密，形成景深
+      const layer = i % 3
+      const depth = layer === 0 ? -0.30 : layer === 1 ? -0.72 : -1.25
+      hazePos[i * 3] = (Math.random() * 2 - 1) * (layer === 0 ? 0.95 : 1.3)
+      hazePos[i * 3 + 1] = (Math.random() * 2 - 1) * (layer === 0 ? 0.42 : 0.58)
+      hazePos[i * 3 + 2] = depth + (Math.random() * 2 - 1) * 0.22
     }
     const hazeGeo = new BufferGeometry()
     hazeGeo.setAttribute('position', new BufferAttribute(hazePos, 3))
@@ -543,14 +665,85 @@ export function createIntelligenceScene(
       new PointsMaterial({
         map: pointTexture,
         color: COLOR.glacier,
-        size: tier === 'reduced' ? 48 : 64,
-        sizeAttenuation: false,
+        size: tier === 'reduced' ? 0.12 : 0.17,
+        sizeAttenuation: true,
         transparent: true,
-        opacity: 0.055,
+        opacity: 0.16,
         depthWrite: false,
+        blending: AdditiveBlending,
       }),
     )
+    hazePoints.frustumCulled = false
     root.add(hazePoints)
+
+    // ── 核心光晕层 ──
+    // 单独一层而不是加大 primaryPoints：星点与核心共用材质时无法只放大核心，
+    // 而核心需要的恰恰是「明显大于星点、且中心实、外圈长尾」的另一套衰减曲线。
+    const primaryList = primaryIds.map((id) => NODE_BY_ID.get(id)!).filter(Boolean)
+    const glowPos = new Float32Array(primaryList.length * 3)
+    const glowCol = new Float32Array(primaryList.length * 3)
+    for (let i = 0; i < primaryList.length; i++) {
+      glowCol[i * 3] = 1
+      glowCol[i * 3 + 1] = 1
+      glowCol[i * 3 + 2] = 1
+    }
+    const glowGeo = new BufferGeometry()
+    glowGeo.setAttribute('position', new BufferAttribute(glowPos, 3))
+    glowGeo.setAttribute('color', new BufferAttribute(glowCol, 3))
+    coreGlow = new Points(
+      glowGeo,
+      new PointsMaterial({
+        map: coreGlowTexture ?? pointTexture,
+        // 同样按世界单位标定：核心本体（primaryPoints）固定 46-52 屏幕像素，
+        // 光晕要明显大于它才能形成「晕」的观感，取 0.2 量级。
+        size: tier === 'reduced' ? 0.15 : compact ? 0.18 : 0.21,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      }),
+    )
+    coreGlow.frustumCulled = false
+    root.add(coreGlow)
+
+    // ── 核心轨道环 ──
+    // 用环贴图 sprite 而非 LineLoop：WebGL 线宽恒为 1px 不可调，画出来的环
+    // 过细且锯齿明显。环 sprite 随手绘制的贴图自带柔边，粗细也可控。
+    const ringPos = new Float32Array(primaryList.length * 3)
+    const ringCol = new Float32Array(primaryList.length * 3)
+    for (let i = 0; i < primaryList.length; i++) {
+      // 环的颜色跟随该核心所属星团的色调，让「环 → 团」产生归属感。
+      // 统一用同一种浅蓝会显得环是外挂的装饰，而不是核心结构的一部分。
+      const cid = primaryList[i]?.clusterId ?? ''
+      const ci = Math.max(0, clusterIds.indexOf(cid))
+      const tint = clusterTints.vert[ci] ?? COLOR.aurora
+      ringCol[i * 3] = tint.r
+      ringCol[i * 3 + 1] = tint.g
+      ringCol[i * 3 + 2] = tint.b
+    }
+    const ringGeo2 = new BufferGeometry()
+    ringGeo2.setAttribute('position', new BufferAttribute(ringPos, 3))
+    ringGeo2.setAttribute('color', new BufferAttribute(ringCol, 3))
+    coreRings = new Points(
+      ringGeo2,
+      new PointsMaterial({
+        map: ringTexture ?? pointTexture,
+        // 环要明显大于光晕，形成「核 → 晕 → 环」的外扩层次。
+        // 但环是 sprite 贴图，会随距离缩放，因此不能取到 0.86 那种量级，
+        // 否则近处会胀成占满屏幕的大圆圈（第一版即为此问题）。
+        size: tier === 'reduced' ? 0.30 : compact ? 0.36 : 0.42,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      }),
+    )
+    coreRings.frustumCulled = false
+    root.add(coreRings)
 
     for (let i = 0; i < nodeOrder.length; i++) {
       const layout = layoutAt(nodeOrder[i]!, 0)
@@ -658,15 +851,23 @@ export function createIntelligenceScene(
   function updateGuides() {
     if (!guidePositions || !guideColors || !guideLines || !nodePositions) return
     const mat = guideLines.material as LineBasicMaterial
-    mat.opacity = activeClusterId ? 1 : 0.9
+    mat.opacity = activeClusterId ? 1 : 0.55
     for (const c of clusters.values()) {
-      const env = c.alpha * awaken
+      // 内联视图下 alpha 为 0（星团未展开），但首页需要看到连线结构，
+      // 因此给一个很低的底值。取 0.22 而非更高：连线一旦清晰就会
+      // 和「展开后才显示完整指引线」的语义冲突，也会让画面变乱。
+      const env = Math.max(c.alpha, activeClusterId ? 0 : INLINE_GUIDE_FLOOR) * awaken
       const ci = clusterIds.indexOf(c.id)
       const planeTint = clusterTints.plane[ci] ?? COLOR.glacier
       const vertTint = clusterTints.vert[ci] ?? COLOR.aurora
       const hotCore = focusedHotspot === c.id ? 1.2 : 1
-      const planeP = Math.max(0, Math.min(1, c.grow / GUIDE_SPLIT))
-      const vertP = Math.max(0, Math.min(1, (c.grow - GUIDE_SPLIT) / (1 - GUIDE_SPLIT)))
+      // 几何展开量也要有内联下限：grow=0 时 planeP/vertP 均为 0，
+      // 四个顶点会全部塌到核心上，线段退化为零长度 —— 即使把颜色调亮也看不见。
+      // 因此这里对「几何进度」本身取下限，与上面的透明度下限配套。
+      const geomFloor = activeClusterId ? 0 : INLINE_GUIDE_FLOOR
+      const growEff = Math.max(c.grow, geomFloor)
+      const planeP = Math.max(0, Math.min(1, growEff / GUIDE_SPLIT))
+      const vertP = Math.max(0, Math.min(1, (growEff - GUIDE_SPLIT) / (1 - GUIDE_SPLIT)))
       const coreIdx = c.coreIdx * 3
       const cx = nodePositions[coreIdx]!
       const cy = nodePositions[coreIdx + 1]!
@@ -908,12 +1109,19 @@ export function createIntelligenceScene(
       if (activeClusterId && layout.clusterId !== activeClusterId) alpha = 0
       let flareGain = 1
       if (layout.role === 'secondary') {
-        // 未展开的星团：星点完全隐藏；展开时闪光渐入（诗云 FADE_IN + HOLD_FLARE）
         const cl = nodeClusterById.get(id)
         const nodeAlpha = cl ? cl.nodesAlpha : 0
-        alpha *= nodeAlpha
-        if (activeClusterId && layout.clusterId === activeClusterId) {
-          alpha = Math.max(alpha, nodeAlpha * 0.9)
+        if (activeClusterId) {
+          // 聚焦视图：星点只在展开后渐入（诗云 FADE_IN + HOLD_FLARE）
+          alpha *= nodeAlpha
+          if (layout.clusterId === activeClusterId) {
+            alpha = Math.max(alpha, nodeAlpha * 0.9)
+          }
+        } else {
+          // 内联视图：给一个恒定的「背景星场」底噪，让星点常驻可见。
+          // 取 0.34 而非更高值：再亮就会被误读为可点击的交互元素，
+          // 也会和核心的亮度层级打架。
+          alpha = Math.max(alpha, INLINE_NODE_FLOOR)
         }
         if (nodeAlpha > 0.004 && cl) flareGain = 1 + cl.flare * 1.2
       }
@@ -1006,13 +1214,87 @@ export function createIntelligenceScene(
         cluster && cluster.nodesAlpha > 0.004 ? activeSecondaryCount : 0,
       )
     } else {
+      // 内联视图也显示次级星点。
+      //
+      // 旧实现这里是 setDrawRange(0, 0)，即未展开时完全不画星点，
+      // 于是首页只剩两个孤立白点，看不出「星团」的结构。
+      // 现在让星点常驻，但整体压暗（见下面的材料 opacity），
+      // 使其作为背景星场存在，不抢核心的注意力、也不暗示「可点击展开」。
       pGeo.setDrawRange(0, activePrimaryCount)
-      sGeo.setDrawRange(0, 0)
+      sGeo.setDrawRange(0, activeSecondaryCount)
     }
     ;(primaryPoints.material as PointsMaterial).opacity = 0.7 + awaken * 0.28
     ;(primaryPoints.material as PointsMaterial).size = tier === 'reduced' ? 34 : compact ? 46 : 52
     ;(secondaryPoints.material as PointsMaterial).opacity = 0.32 + awaken * 0.36
     ;(secondaryPoints.material as PointsMaterial).size = tier === 'reduced' ? 16 : compact ? 20 : 22
+
+    updateCoreLayers(activePrimaryCount)
+  }
+
+  /**
+   * 更新核心的光晕层与轨道环层。
+   *
+   * 这两层刻意独立于 primaryPoints：
+   * - primaryPoints 的 size 是世界单位且统一，无法只放大核心；
+   *   而核心需要明显大于普通星点，且有另一套衰减曲线（中心实、外圈长尾）。
+   * - 用 sprite 而非真实 3D 环几何：环需要始终正对镜头才好看，
+   *   球面环在相机横移时会退化成一条线。sprite 天然 billboard，转到任何角度都成立。
+   *
+   * 位置直接取自 primaryPositions 的前 activePrimaryCount 个顶点 ——
+   * 那是本帧已被 writePointBuffer 压实到前缀的可见核心，不必重新计算布局。
+   */
+  function updateCoreLayers(activePrimaryCount: number) {
+    if (!coreGlow || !coreRings) return
+    const glowGeo = coreGlow.geometry as BufferGeometry
+    const ringGeo = coreRings.geometry as BufferGeometry
+    const glowAttr = glowGeo.getAttribute('position') as BufferAttribute
+    const ringAttr = ringGeo.getAttribute('position') as BufferAttribute
+    const glowArr = glowAttr.array as Float32Array
+    const ringArr = ringAttr.array as Float32Array
+    const src = primaryPos as Float32Array
+
+    // 呼吸：极缓的正弦（周期约 6s），振幅仅 3% —— 目的是让画面「活」，
+    // 一旦振幅超过 5% 就会变成明显的闪烁，反而廉价。
+    const breathe = 1 + Math.sin(pulseT * 1.04) * 0.03
+    const ringBreathe = 1 + Math.sin(pulseT * 1.04 + 0.7) * 0.045
+    const visible = Math.min(activePrimaryCount, src.length / 3)
+
+    for (let i = 0; i < visible; i++) {
+      const ix = i * 3
+      // 光晕略微上抬并保持原地：核本身由 primaryPoints 绘制，
+      // 光晕只是衬底，位置必须严格重合，偏移一点就会出现「重影」
+      glowArr[ix] = src[ix]!
+      glowArr[ix + 1] = src[ix + 1]!
+      glowArr[ix + 2] = src[ix + 2]!
+      ringArr[ix] = src[ix]!
+      ringArr[ix + 1] = src[ix + 1]!
+      ringArr[ix + 2] = src[ix + 2]!
+    }
+    glowAttr.needsUpdate = true
+    ringAttr.needsUpdate = true
+    glowGeo.setDrawRange(0, visible)
+    ringGeo.setDrawRange(0, visible)
+
+    // 星团聚焦时核心是主角，光晕与环都要更亮更明显；
+    // 内联视图里三者同时出现，环需要收敛以免抢走星点的注意力。
+    //
+    // 光晕不透明度给得比环高很多：光晕是「核心在发光」的证据，
+    // 环只是空间参考。之前两者接近，导致环比核心本身还显眼 ——
+    // 观感上核心变成了一个空心的瞄准镜。
+    const focused = activeClusterId ? 1 : 0.62
+    ;(coreGlow.material as PointsMaterial).opacity = (0.62 + awaken * 0.34) * focused * breathe
+    ;(coreRings.material as PointsMaterial).opacity = (0.14 + awaken * 0.14) * focused * ringBreathe
+
+    // 环的尺寸需要随取景尺度反向补偿。
+    //
+    // sprite 用的是世界单位 + sizeAttenuation，因此 flyTo 把 scale 推到 20+
+    // 时（聚焦单个星团），同一个世界尺寸的环会被放大十几倍，变成一圈巨大的
+    // 「瞄准镜」把整个星团框在里面。这里按 focus.scale 做 1/scale 补偿，
+    // 让环在屏幕上大致维持恒定直径，观感才与内联视图一致。
+    const ringWorldSize =
+      (tier === 'reduced' ? 0.30 : compact ? 0.36 : 0.42) /
+      Math.max(1, focus.scale * 0.55)
+    ;(coreRings.material as PointsMaterial).size = ringWorldSize
   }
 
   function updateAmbient(dt: number) {
@@ -1041,9 +1323,19 @@ export function createIntelligenceScene(
     // field atmosphere. Hide ambient sprites so they cannot resemble a second core.
     ;(ambientPoints.material as PointsMaterial).opacity = activeClusterId
       ? 0
-      : 0.08 + awaken * 0.18
+      : 0.22 + awaken * 0.2
     if (hazePoints) {
-      ;(hazePoints.material as PointsMaterial).opacity = activeClusterId ? 0 : 0.055
+      // 星云层在聚焦视图下保留（作为空间纵深），但压暗以免干扰核心。
+      ;(hazePoints.material as PointsMaterial).opacity = activeClusterId
+        ? 0.08
+        : 0.14 + awaken * 0.08
+    }
+    if (dustPoints) {
+      // 星尘在聚焦视图下完全隐藏：那里需要绝对干净的背景来突出单个星团，
+      // 多余的装饰点会被误认为未展开的节点。
+      ;(dustPoints.material as PointsMaterial).opacity = activeClusterId
+        ? 0
+        : 0.2 + awaken * 0.14
     }
     void dt
   }
@@ -1518,7 +1810,11 @@ export function createIntelligenceScene(
     // 的整团跨度留位置，因此按完整包围盒（含外围节点）取景。
     // 系数偏大一点（1.45）让星团不要顶到视口边缘 —— 顶边会削弱
     // 「两团星 + 中间桥」的构图，也让核心点难以点击。
-    const padding = anyExpanded ? 1.35 : 1.45
+    //
+    // 窄视口（移动端，aspect < 1）需要额外余量：星场本身是 5:1 的扁长形状，
+    // 在近方形画布上宽度约束主导，核心会被推到几乎贴边而显得局促。
+    const aspectPadding = aspect < 1 ? 1.22 : 1
+    const padding = (anyExpanded ? 1.35 : 1.45) * aspectPadding
     const scale = Math.max(
       0.35,
       Math.min(
@@ -2078,8 +2374,15 @@ export function createIntelligenceScene(
     for (const ring of ringLoops.values()) disposeObj(ring)
     ringLoops.clear()
     disposeObj(hazePoints)
+    disposeObj(coreGlow)
+    disposeObj(coreRings)
+    disposeObj(dustPoints)
     pointTexture?.dispose()
     pointTexture = null
+    coreGlowTexture?.dispose()
+    coreGlowTexture = null
+    ringTexture?.dispose()
+    ringTexture = null
 
     primaryPoints = null
     secondaryPoints = null
@@ -2087,6 +2390,9 @@ export function createIntelligenceScene(
     guideLines = null
     bridgeLines = null
     hazePoints = null
+    coreGlow = null
+    coreRings = null
+    dustPoints = null
     scene = null
     camera = null
     root = null
