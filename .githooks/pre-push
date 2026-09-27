@@ -3,8 +3,9 @@
 # LABA 自动部署 hook
 #
 # 作用：在执行 `git push` 且推送目标包含 main 时，自动构建前端并把产物
-#       发布到 gh-pages 分支 —— 也就是 https://wustlaba.github.io/LABA/ 的
-#       实际来源分支，从而让线上站点自动更新。
+#       发布到 gh-pages 分支 —— 也就是线上站点的实际来源分支
+#       （https://baidu.wust.club/ 与 https://wustlaba.github.io/LABA/），
+#       从而让线上站点自动更新。
 #
 # 停用：删除本文件，或执行 git config --unset core.hooksPath
 # 本文件是权威版本，经 core.hooksPath 启用（见 README「## 部署」）：
@@ -134,7 +135,7 @@ else
       -c user.email="deploy@localhost" \
       commit --quiet -m "Deploy $SRC to GitHub Pages"; then
     if git -C "$WORK" push --quiet origin HEAD:gh-pages; then
-      echo "[deploy] 已发布到 gh-pages，约 1 分钟后生效：https://wustlaba.github.io/LABA/"
+      echo "[deploy] 已发布到 gh-pages，约 1 分钟后生效：https://baidu.wust.club/"
     else
       echo "[deploy] 推送 gh-pages 失败（网络或凭据问题），线上保持原版本。"
     fi

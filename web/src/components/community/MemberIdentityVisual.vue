@@ -7,7 +7,7 @@ const props = defineProps<{
   member: Member
 }>()
 
-/** Resolve public/ assets against Vite `base` (GitHub Pages uses `/LABA/`). */
+/** Resolve public/ assets against Vite `base`. */
 const avatarSrc = computed(() => {
   const avatar = props.member.avatar
   if (!avatar) return undefined

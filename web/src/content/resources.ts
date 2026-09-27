@@ -43,8 +43,8 @@ export interface LearningResource {
 /**
  * 拼出指向 public/ 下资源的正确路径。
  *
- * 必须用 BASE_URL 而不是硬编码 '/resources/...'：站点部署在 GitHub Pages
- * 的项目页下，base 是 '/LABA/'，硬编码根路径在本地 dev 能打开、线上却 404。
+ * 用 BASE_URL 而不是硬编码 '/resources/...'：base 在 vite.config.ts 中定义，
+ * 本地 dev 与生产可能不同，跟随 BASE_URL 可以避免路径写死后线上 404。
  */
 export function toAssetPath(path: string): string {
   const base = import.meta.env.BASE_URL || '/'
