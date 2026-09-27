@@ -83,6 +83,18 @@ fi
 cp "$WEB/dist/index.html" "$WEB/dist/404.html"   # SPA 深链回退
 touch "$WEB/dist/.nojekyll"                      # 让 Pages 跳过 Jekyll 预构建
 
+# 写入 CNAME，声明本站绑定的自定义域名。
+#
+# 这一步不可省略：绑定自定义域名时 GitHub Pages 会在 gh-pages 分支根目录
+# 自动生成一个 CNAME 文件。但本 hook 后面会用 dist/ 的完整内容替换该分支，
+# 而 dist/ 里没有这个文件 —— 于是每次部署都会把 CNAME 删掉，域名随即失效
+# （访问返回 GitHub 的 "Site not found" 404 页），GitHub 再自动重建，
+# 下次部署又被删掉，如此循环。
+#
+# CNAME 内容必须是裸域名（不带协议、不带路径、不带结尾斜杠），
+# 否则 GitHub Pages 无法识别。
+printf '%s\n' "baidu.wust.club" > "$WEB/dist/CNAME"
+
 WORK="$(mktemp -d)" || { echo "[deploy] 无法创建临时目录，跳过部署。"; exit 0; }
 
 # Git for Windows 下 mktemp 可能返回 POSIX 形式（/tmp/...），原生 git 无法识别；
