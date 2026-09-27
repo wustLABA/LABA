@@ -64,17 +64,6 @@ const BRIDGE_SEGMENTS = 24
 const MIN_VIEW_SCALE = 0.36
 const MAX_VIEW_SCALE = 1.2
 const WHEEL_ZOOM_FACTOR = 0.0012
-/**
- * 内联视图下次级星点的不透明度下限。
- * 让首页在未展开时也能看到星团的结构，而不是两个孤立白点。
- * 取值偏低的理由见 updateNodes 中的注释。
- */
-const INLINE_NODE_FLOOR = 0.34
-/**
- * 内联视图下指引线的不透明度下限，让首页能看到星团内部的连接结构。
- * 比星点更低：连线是辅助信息，清晰度不能盖过节点本身。
- */
-const INLINE_GUIDE_FLOOR = 0.22
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -254,16 +243,12 @@ export function createIntelligenceScene(
   let root: Group | null = null
   let primaryPoints: Points | null = null
   let secondaryPoints: Points | null = null
-  let ambientPoints: Points | null = null
   let guideLines: LineSegments | null = null
   let bridgeLines: Line | null = null
-  let hazePoints: Points | null = null
   /** 核心光晕层：每个主节点一个 sprite，负责「亮核 → 外晕」的层次 */
   let coreGlow: Points | null = null
   /** 核心赤道环层：用环贴图 sprite 代替线环，获得可控粗细与柔边 */
   let coreRings: Points | null = null
-  /** 装饰性微星尘：填充星团之间的空黑，不参与拾取 */
-  let dustPoints: Points | null = null
 
   let nodePositions: Float32Array | null = null
   let nodeColors: Float32Array | null = null
@@ -272,8 +257,6 @@ export function createIntelligenceScene(
   let primaryCol: Float32Array | null = null
   let secondaryPos: Float32Array | null = null
   let secondaryCol: Float32Array | null = null
-  let ambientPositions: Float32Array | null = null
-  let ambientBase: Float32Array | null = null
   let guidePositions: Float32Array | null = null
   let guideColors: Float32Array | null = null
   let bridgePositions: Float32Array | null = null
@@ -523,7 +506,6 @@ export function createIntelligenceScene(
   function buildGeometries() {
     if (!scene || !root) return
 
-    const { ambient } = counts()
     const nodeCount = nodeOrder.length
 
     nodePositions = new Float32Array(nodeCount * 3)
@@ -574,107 +556,6 @@ export function createIntelligenceScene(
       }),
     )
     root.add(secondaryPoints)
-
-    ambientPositions = new Float32Array(ambient * 3)
-    ambientBase = new Float32Array(ambient * 3)
-    for (let i = 0; i < ambient; i++) {
-      // Most in field; a few outliers expand spatial boundary
-      const outlier = i % 7 === 0
-      const spreadX = outlier ? 1.35 : 1.05
-      const spreadY = outlier ? 0.72 : 0.5
-      const x = (Math.random() * 2 - 1) * spreadX
-      const y = (Math.random() * 2 - 1) * spreadY
-      const z = -0.42 - Math.random() * 0.28
-      ambientBase[i * 3] = x
-      ambientBase[i * 3 + 1] = y
-      ambientBase[i * 3 + 2] = z
-      ambientPositions[i * 3] = x
-      ambientPositions[i * 3 + 1] = y
-      ambientPositions[i * 3 + 2] = z
-    }
-    const ambGeo = new BufferGeometry()
-    ambGeo.setAttribute('position', new BufferAttribute(ambientPositions, 3))
-    ambientPoints = new Points(
-      ambGeo,
-      new PointsMaterial({
-        map: pointTexture,
-        color: COLOR.stream,
-        size: compact ? 4.5 : 5.5,
-        sizeAttenuation: false,
-        transparent: true,
-        opacity: 0.28,
-        depthWrite: false,
-        blending: AdditiveBlending,
-      }),
-    )
-    root.add(ambientPoints)
-
-    // ── 微星尘 ──
-    // 比 ambientPoints 更细、更密、更暗的一层，铺在星团下方。
-    // 作用不是「显示信息」，而是消除大片空黑造成的空洞感 ——
-    // 只靠 40 个语义节点，星团之间会显得很空，观感偏「示意图」而非「星图」。
-    // 因此这层用纯装饰性随机点，不参与拾取、不随模式变化。
-    const dustCount = tier === 'reduced' ? 90 : tier === 'balanced' ? 190 : 300
-    const dustPos = new Float32Array(dustCount * 3)
-    for (let i = 0; i < dustCount; i++) {
-      // 集中在双核连线的水平带内，z 轴铺开以形成纵深
-      dustPos[i * 3] = (Math.random() * 2 - 1) * 1.5
-      dustPos[i * 3 + 1] = (Math.random() * 2 - 1) * 0.62
-      dustPos[i * 3 + 2] = -1.6 + Math.random() * 1.5
-    }
-    const dustGeo = new BufferGeometry()
-    dustGeo.setAttribute('position', new BufferAttribute(dustPos, 3))
-    dustPoints = new Points(
-      dustGeo,
-      new PointsMaterial({
-        map: pointTexture,
-        color: COLOR.glacier,
-        size: tier === 'reduced' ? 1.6 : 2.1,
-        sizeAttenuation: false,
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false,
-        blending: AdditiveBlending,
-      }),
-    )
-    dustPoints.frustumCulled = false
-    root.add(dustPoints)
-
-    // ── 星云雾层 ──
-    // 旧实现用 sizeAttenuation:false + size:64（固定 64 屏幕像素），20 个雾点
-    // 在 1104px 宽的画布上必然连成一片灰色贴纸，把星点全盖住。
-    //
-    // 改为开启 sizeAttenuation 后必须重新标定 size：它现在是世界单位，
-    // 且近处雾点（z≈-0.3）会被透视显著放大。0.95 会让近层膨成巨大的白色
-    // 棉花团并互相叠加过曝，因此取 0.16 量级 —— 雾点的作用是「底噪般的
-    // 薄雾」，不是可视的球体。不透明度也相应从 0.5 降到 0.16。
-    const hazeCount = tier === 'reduced' ? 26 : 52
-    const hazePos = new Float32Array(hazeCount * 3)
-    for (let i = 0; i < hazeCount; i++) {
-      // 分三层纵深：近层大而淡、远层小而密，形成景深
-      const layer = i % 3
-      const depth = layer === 0 ? -0.30 : layer === 1 ? -0.72 : -1.25
-      hazePos[i * 3] = (Math.random() * 2 - 1) * (layer === 0 ? 0.95 : 1.3)
-      hazePos[i * 3 + 1] = (Math.random() * 2 - 1) * (layer === 0 ? 0.42 : 0.58)
-      hazePos[i * 3 + 2] = depth + (Math.random() * 2 - 1) * 0.22
-    }
-    const hazeGeo = new BufferGeometry()
-    hazeGeo.setAttribute('position', new BufferAttribute(hazePos, 3))
-    hazePoints = new Points(
-      hazeGeo,
-      new PointsMaterial({
-        map: pointTexture,
-        color: COLOR.glacier,
-        size: tier === 'reduced' ? 0.12 : 0.17,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.16,
-        depthWrite: false,
-        blending: AdditiveBlending,
-      }),
-    )
-    hazePoints.frustumCulled = false
-    root.add(hazePoints)
 
     // ── 核心光晕层 ──
     // 单独一层而不是加大 primaryPoints：星点与核心共用材质时无法只放大核心，
@@ -851,23 +732,17 @@ export function createIntelligenceScene(
   function updateGuides() {
     if (!guidePositions || !guideColors || !guideLines || !nodePositions) return
     const mat = guideLines.material as LineBasicMaterial
-    mat.opacity = activeClusterId ? 1 : 0.55
+    mat.opacity = activeClusterId ? 1 : 0.9
     for (const c of clusters.values()) {
-      // 内联视图下 alpha 为 0（星团未展开），但首页需要看到连线结构，
-      // 因此给一个很低的底值。取 0.22 而非更高：连线一旦清晰就会
-      // 和「展开后才显示完整指引线」的语义冲突，也会让画面变乱。
-      const env = Math.max(c.alpha, activeClusterId ? 0 : INLINE_GUIDE_FLOOR) * awaken
+      // 未展开时 alpha 为 0，连线随之完全不可见 —— 这是刻意的：
+      // 内联视图只呈现两个核心，连线属于展开后的内容。
+      const env = c.alpha * awaken
       const ci = clusterIds.indexOf(c.id)
       const planeTint = clusterTints.plane[ci] ?? COLOR.glacier
       const vertTint = clusterTints.vert[ci] ?? COLOR.aurora
       const hotCore = focusedHotspot === c.id ? 1.2 : 1
-      // 几何展开量也要有内联下限：grow=0 时 planeP/vertP 均为 0，
-      // 四个顶点会全部塌到核心上，线段退化为零长度 —— 即使把颜色调亮也看不见。
-      // 因此这里对「几何进度」本身取下限，与上面的透明度下限配套。
-      const geomFloor = activeClusterId ? 0 : INLINE_GUIDE_FLOOR
-      const growEff = Math.max(c.grow, geomFloor)
-      const planeP = Math.max(0, Math.min(1, growEff / GUIDE_SPLIT))
-      const vertP = Math.max(0, Math.min(1, (growEff - GUIDE_SPLIT) / (1 - GUIDE_SPLIT)))
+      const planeP = Math.max(0, Math.min(1, c.grow / GUIDE_SPLIT))
+      const vertP = Math.max(0, Math.min(1, (c.grow - GUIDE_SPLIT) / (1 - GUIDE_SPLIT)))
       const coreIdx = c.coreIdx * 3
       const cx = nodePositions[coreIdx]!
       const cy = nodePositions[coreIdx + 1]!
@@ -1109,19 +984,12 @@ export function createIntelligenceScene(
       if (activeClusterId && layout.clusterId !== activeClusterId) alpha = 0
       let flareGain = 1
       if (layout.role === 'secondary') {
+        // 未展开的星团：星点完全隐藏；展开时闪光渐入（诗云 FADE_IN + HOLD_FLARE）
         const cl = nodeClusterById.get(id)
         const nodeAlpha = cl ? cl.nodesAlpha : 0
-        if (activeClusterId) {
-          // 聚焦视图：星点只在展开后渐入（诗云 FADE_IN + HOLD_FLARE）
-          alpha *= nodeAlpha
-          if (layout.clusterId === activeClusterId) {
-            alpha = Math.max(alpha, nodeAlpha * 0.9)
-          }
-        } else {
-          // 内联视图：给一个恒定的「背景星场」底噪，让星点常驻可见。
-          // 取 0.34 而非更高值：再亮就会被误读为可点击的交互元素，
-          // 也会和核心的亮度层级打架。
-          alpha = Math.max(alpha, INLINE_NODE_FLOOR)
+        alpha *= nodeAlpha
+        if (activeClusterId && layout.clusterId === activeClusterId) {
+          alpha = Math.max(alpha, nodeAlpha * 0.9)
         }
         if (nodeAlpha > 0.004 && cl) flareGain = 1 + cl.flare * 1.2
       }
@@ -1214,14 +1082,11 @@ export function createIntelligenceScene(
         cluster && cluster.nodesAlpha > 0.004 ? activeSecondaryCount : 0,
       )
     } else {
-      // 内联视图也显示次级星点。
-      //
-      // 旧实现这里是 setDrawRange(0, 0)，即未展开时完全不画星点，
-      // 于是首页只剩两个孤立白点，看不出「星团」的结构。
-      // 现在让星点常驻，但整体压暗（见下面的材料 opacity），
-      // 使其作为背景星场存在，不抢核心的注意力、也不暗示「可点击展开」。
+      // 内联（缩小）视图刻意只画两个核心，不显示次级星点与连线。
+      // 缩略状态的职责是「让人认出这是两条路径」，不是展示知识结构；
+      // 画出星点会被误读为可点击的交互元素，也与展开后的形态混淆。
       pGeo.setDrawRange(0, activePrimaryCount)
-      sGeo.setDrawRange(0, activeSecondaryCount)
+      sGeo.setDrawRange(0, 0)
     }
     ;(primaryPoints.material as PointsMaterial).opacity = 0.7 + awaken * 0.28
     ;(primaryPoints.material as PointsMaterial).size = tier === 'reduced' ? 34 : compact ? 46 : 52
@@ -1295,49 +1160,6 @@ export function createIntelligenceScene(
       (tier === 'reduced' ? 0.30 : compact ? 0.36 : 0.42) /
       Math.max(1, focus.scale * 0.55)
     ;(coreRings.material as PointsMaterial).size = ringWorldSize
-  }
-
-  function updateAmbient(dt: number) {
-    if (!ambientPositions || !ambientBase || !ambientPoints) return
-    const { idleStrength } = counts()
-    const n = ambientBase.length / 3
-    for (let i = 0; i < n; i++) {
-      const ix = i * 3
-      if (reducedMotion) {
-        ambientPositions[ix] = ambientBase[ix]!
-        ambientPositions[ix + 1] = ambientBase[ix + 1]!
-        ambientPositions[ix + 2] = ambientBase[ix + 2]!
-        continue
-      }
-      const drift = pulseT * (0.04 + (i % 5) * 0.008) * idleStrength
-      // Background layer — weaker parallax than foreground nodes
-      ambientPositions[ix] =
-        ambientBase[ix]! + Math.sin(drift + i) * 0.015 + pointer.x * 0.004
-      ambientPositions[ix + 1] =
-        ambientBase[ix + 1]! + Math.cos(drift * 0.8 + i) * 0.012 + pointer.y * 0.003
-      ambientPositions[ix + 2] = ambientBase[ix + 2]!
-    }
-    ;(ambientPoints.geometry.getAttribute('position') as BufferAttribute).needsUpdate =
-      true
-    // The focused presentation is an isolated constellation, not the inline
-    // field atmosphere. Hide ambient sprites so they cannot resemble a second core.
-    ;(ambientPoints.material as PointsMaterial).opacity = activeClusterId
-      ? 0
-      : 0.22 + awaken * 0.2
-    if (hazePoints) {
-      // 星云层在聚焦视图下保留（作为空间纵深），但压暗以免干扰核心。
-      ;(hazePoints.material as PointsMaterial).opacity = activeClusterId
-        ? 0.08
-        : 0.14 + awaken * 0.08
-    }
-    if (dustPoints) {
-      // 星尘在聚焦视图下完全隐藏：那里需要绝对干净的背景来突出单个星团，
-      // 多余的装饰点会被误认为未展开的节点。
-      ;(dustPoints.material as PointsMaterial).opacity = activeClusterId
-        ? 0
-        : 0.2 + awaken * 0.14
-    }
-    void dt
   }
 
   /**
@@ -1452,7 +1274,6 @@ export function createIntelligenceScene(
     updateGuides()
     updateBridge()
     updateRings()
-    updateAmbient(dt)
     updateCamera()
     renderer.render(scene, camera)
   }
@@ -2130,7 +1951,7 @@ export function createIntelligenceScene(
     // 注意：这里【不】把 activeClusterId 置空。
     // updateClusters() 里 `if (activeClusterId === c.id) c.alpha = 1` 会在
     // 聚焦期间锁住 alpha；若在收起动画开始前就置空，收起逻辑虽能跑，
-    // 但 updateAmbient / 拾取 / 引导线亮度会立刻按「非聚焦」重算，
+    // 但拾取 / 引导线亮度会立刻按「非聚焦」重算，
     // 造成一帧内的亮度跳变。改为收起播完后再由 finishExitFocus 清空。
     focusedHotspot = null
     hoveredId = null
@@ -2368,15 +2189,12 @@ export function createIntelligenceScene(
     }
     disposeObj(primaryPoints)
     disposeObj(secondaryPoints)
-    disposeObj(ambientPoints)
     disposeObj(guideLines)
     disposeObj(bridgeLines)
     for (const ring of ringLoops.values()) disposeObj(ring)
     ringLoops.clear()
-    disposeObj(hazePoints)
     disposeObj(coreGlow)
     disposeObj(coreRings)
-    disposeObj(dustPoints)
     pointTexture?.dispose()
     pointTexture = null
     coreGlowTexture?.dispose()
@@ -2386,13 +2204,10 @@ export function createIntelligenceScene(
 
     primaryPoints = null
     secondaryPoints = null
-    ambientPoints = null
     guideLines = null
     bridgeLines = null
-    hazePoints = null
     coreGlow = null
     coreRings = null
-    dustPoints = null
     scene = null
     camera = null
     root = null

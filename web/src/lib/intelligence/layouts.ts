@@ -176,11 +176,18 @@ const mobileNodes = buildLayout.nodes.map((item) => ({ ...item, position: { x: i
 export const buildLayoutMobile: SceneLayout = { nodes: mobileNodes, edges: buildLayout.edges }
 export const understandLayoutMobile = buildLayoutMobile
 
+/**
+ * 性能档位对应的场景参数。
+ *
+ * 内联（缩小）视图刻意不显示次级星点与指引线，因此这里不再有
+ * ambient 星点数量 —— 背景星点层已整体移除，只保留星云与两个核心。
+ * idleStrength 仍用于节点弹簧的静止微动幅度。
+ */
 export function resolvePerformanceCounts(tier: 'high' | 'balanced' | 'reduced') {
   switch (tier) {
-    case 'high': return { ambient: 120, secondaryVisible: 40, curveSegments: 10, idleStrength: 0.85 }
-    case 'balanced': return { ambient: 72, secondaryVisible: 40, curveSegments: 8, idleStrength: 0.6 }
-    case 'reduced': return { ambient: 36, secondaryVisible: 40, curveSegments: 6, idleStrength: 0.3 }
+    case 'high': return { secondaryVisible: 40, curveSegments: 10, idleStrength: 0.85 }
+    case 'balanced': return { secondaryVisible: 40, curveSegments: 8, idleStrength: 0.6 }
+    case 'reduced': return { secondaryVisible: 40, curveSegments: 6, idleStrength: 0.3 }
   }
 }
 
