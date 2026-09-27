@@ -37,8 +37,8 @@
 
 3. 想让它在阶段卡片里就近显示，加 `mustRead: true`（每个阶段最多显示 3 条）。
 
-`href` 一律用 `toAssetPath()` 生成，不要手写 `/LABA/...` 或 `/resources/...`：
-站点部署在 GitHub Pages 的项目页下，硬编码根路径会在线上 404。
+`href` 一律用 `toAssetPath()` 生成，不要手写 `/resources/...`：
+该函数跟随 Vite 的 `base` 拼接路径，写死路径在 base 变化时会在线上 404。
 
 ## 注意
 
