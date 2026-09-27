@@ -144,7 +144,26 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/*
+ * 时间轴的对齐系统。
+ *
+ * 关键设计：所有纵向元素的位置都由 --story-axis 推导，而不是各自手调。
+ *
+ * 旧实现的问题正是「各自手调」：
+ *   · rail 定在 left: 0.85rem
+ *   · 节点在 2rem 宽的列里居中 → 实际中心 1rem
+ *   两者差 0.15rem，肉眼即可看出节点没落在线上；再加上节点用
+ *   padding-top: 0.35rem 去够内容首行，字号一变就偏。这类偏移无法靠
+ *   试参数长期维持，必须让它们共用同一个基准。
+ *
+ * 现在：--story-axis 表示轴心到内容左缘的距离，rail 与节点都由它和
+ * 自身宽度反推，改一个值全轴联动。
+ */
 .story {
+  --story-axis: 1.5rem; /* 轴心相对内容区左缘的偏移 */
+  --story-dot: 0.75rem; /* 节点直径 */
+  --story-axis-gap: var(--space-8); /* 轴心到正文的距离 */
+
   position: relative;
   padding-block: var(--space-20) 0;
   scroll-margin-top: var(--scroll-padding-top);
@@ -196,23 +215,43 @@ onBeforeUnmount(() => {
 .story__track {
   position: relative;
   display: grid;
-  padding-left: 0;
   min-height: 28rem;
 }
 
+/*
+ * 竖线：中心严格落在 --story-axis 上。
+ * 用 mask 让两端渐隐，避免线条以直角硬切入空白区域 —— 这是让整体
+ * 看起来「现代」而非「默认样式」的重要细节。
+ */
 .story__rail {
   position: absolute;
-  left: 0.85rem;
-  top: 0.35rem;
+  left: var(--story-axis);
+  top: 0;
   bottom: 0;
   width: 2px;
+  transform: translateX(-1px);
   pointer-events: none;
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 1.5rem,
+    #000 calc(100% - 3rem),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 1.5rem,
+    #000 calc(100% - 3rem),
+    transparent 100%
+  );
 }
 
 .story__rail-track {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--color-line) 75%, transparent);
+  background: var(--color-line);
+  border-radius: 1px;
 }
 
 .story__rail-progress {
@@ -220,14 +259,21 @@ onBeforeUnmount(() => {
   left: 0;
   top: 0;
   width: 100%;
+  border-radius: 1px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--color-aurora) 55%, var(--color-sky)),
-    color-mix(in srgb, var(--color-sky) 70%, var(--color-mountain))
+    var(--color-aurora),
+    var(--color-sky) 60%,
+    var(--color-mountain)
   );
   transition: height 80ms linear;
 }
 
+/*
+ * 列表间距：这是「留白节奏」的唯一真源。
+ * 旧实现在这里给 gap，又在 .story__body 上叠 padding-bottom，
+ * 两个值互相干扰，导致阶段间距实际不可控。
+ */
 .story__list {
   list-style: none;
   margin: 0;
@@ -239,77 +285,77 @@ onBeforeUnmount(() => {
 .story__item {
   position: relative;
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
-  gap: var(--space-5);
-  padding-left: 0;
-  opacity: 0.78;
-  transition:
-    opacity var(--duration-normal) var(--ease-out-soft),
-    transform var(--duration-normal) var(--ease-out-soft);
-}
-
-.story__item--passed {
-  opacity: 0.88;
-}
-
-.story__item--active {
+  grid-template-columns: var(--story-axis-gap) minmax(0, 1fr);
+  /*
+   * 节点与正文首行基线对齐：
+   * 首行是 --text-xs 的序号行，其行框高度为 text-xs * leading-normal。
+   * 让节点中心落在该行框的中线上，视觉上就与文字对齐。
+   */
+  align-items: start;
   opacity: 1;
-}
-
-.story__item:not(.story__item--active) .story__item-title {
-  color: var(--color-text-secondary);
-}
-
-.story__item:not(.story__item--active) .story__statement {
-  color: color-mix(in srgb, var(--color-text-secondary) 88%, var(--color-text-muted));
-}
-
-.story__item--active .story__item-title {
-  color: var(--color-text);
-}
-
-.story__item--active .story__statement {
-  color: var(--color-text-secondary);
+  transition: transform var(--duration-normal) var(--ease-out-soft);
 }
 
 .story__mark {
   position: relative;
   display: grid;
-  place-items: start center;
-  padding-top: 0.35rem;
+  /*
+   * 节点中心必须落在 --story-axis 上，而该列宽是 --story-axis-gap，
+   * 两者通常不等（轴心 1.5rem vs 列宽 2.5rem）。
+   * 因此不能用 justify-items: center —— 那会把节点居中到列里，
+   * 与竖线错开半个列宽。改为左对齐后整体右移 --story-axis，再回退
+   * 自身半径，使节点中心恰好压在轴上。
+   */
+  justify-items: start;
+  width: var(--story-axis-gap);
+  padding-top: 0.2rem;
 }
 
 .story__dot {
-  width: 0.65rem;
-  height: 0.65rem;
+  /* 左移半个自身宽度，把圆心对准 --story-axis */
+  margin-left: calc(var(--story-axis) - var(--story-dot) / 2);
+  width: var(--story-dot);
+  height: var(--story-dot);
   border-radius: 50%;
-  background: var(--color-mist);
-  border: 2px solid var(--color-line);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-snow) 80%, transparent);
+  /* 未激活：白底 + 浅灰描边，弱化但仍清晰可辨 */
+  background: var(--color-snow);
+  border: 2px solid color-mix(in srgb, var(--color-line) 88%, var(--color-text-muted));
+  /* 用与外层背景同色的光环把节点从竖线上「挖」出来 */
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-snow) 92%, transparent);
   transition:
     background var(--duration-normal) var(--ease-out-soft),
     border-color var(--duration-normal) var(--ease-out-soft),
-    box-shadow var(--duration-normal) var(--ease-out-soft);
+    box-shadow var(--duration-normal) var(--ease-out-soft),
+    transform var(--duration-normal) var(--ease-out-soft);
 }
 
+/* 已读阶段：实心 mountain，比未激活明确、比当前项克制 */
 .story__item--passed .story__dot {
   background: var(--color-mountain);
   border-color: var(--color-mountain);
 }
 
+/*
+ * 当前阶段：实心强调色 + 柔和外发光 + 轻微放大。
+ * 三层阴影叠加出「发光」而非「描边」的观感：内层白光环隔开竖线，
+ * 中层短距光晕，外层大范围淡光。
+ */
 .story__item--active .story__dot {
-  background: var(--color-aurora);
+  background: var(--color-sky);
   border-color: var(--color-sky);
+  transform: scale(1.12);
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--color-snow) 70%, transparent),
-    0 0 12px color-mix(in srgb, var(--color-aurora) 35%, transparent);
+    0 0 0 4px color-mix(in srgb, var(--color-snow) 92%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--color-sky) 22%, transparent),
+    0 0 16px 2px color-mix(in srgb, var(--color-aurora) 42%, transparent);
 }
 
 .story__body {
   display: grid;
+  /* 内容区内部节奏：序号行 → 标题 → 描述 → 辅助信息 */
   gap: var(--space-2);
   max-width: 34rem;
-  padding-bottom: var(--space-2);
+  padding-bottom: 0;
 }
 
 .story__index {
@@ -320,9 +366,11 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  line-height: var(--leading-normal);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--color-text-muted);
+  transition: color var(--duration-normal) var(--ease-out-soft);
 }
 
 .story__item--active .story__index {
@@ -345,6 +393,32 @@ onBeforeUnmount(() => {
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
+  transition: color var(--duration-normal) var(--ease-out-soft);
+}
+
+/*
+ * 未激活项不整体降透明度。
+ * 旧实现用 opacity: 0.78 压暗整块，代价是描述文字对比度掉到
+ * 可读性边缘；改为只降文字颜色，层级由颜色而非透明度表达。
+ */
+.story__item:not(.story__item--active):not(.story__item--passed) .story__item-title {
+  color: color-mix(in srgb, var(--color-text) 62%, var(--color-text-muted));
+}
+
+.story__item--passed .story__item-title {
+  color: var(--color-text-secondary);
+}
+
+.story__item:not(.story__item--active) .story__statement {
+  color: var(--color-text-muted);
+}
+
+.story__item--active .story__item-title {
+  color: var(--color-text);
+}
+
+.story__item--active .story__statement {
+  color: var(--color-text-secondary);
 }
 
 .story__statement {
@@ -352,12 +426,15 @@ onBeforeUnmount(() => {
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   color: var(--color-text-secondary);
+  transition: color var(--duration-normal) var(--ease-out-soft);
 }
 
+/* 辅助信息：与描述拉开距离，形成「正文 / 注脚」两层 */
 .story__dev {
-  margin: var(--space-2) 0 0;
+  margin: var(--space-1) 0 0;
   font-family: var(--font-mono);
   font-size: 0.625rem;
+  line-height: var(--leading-normal);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--color-text-muted) 85%, transparent);
@@ -375,10 +452,11 @@ onBeforeUnmount(() => {
 
 .story__continuum-rail {
   position: absolute;
-  left: 0.85rem;
+  left: var(--story-axis);
   top: 0;
   bottom: 0;
   width: 2px;
+  transform: translateX(-1px);
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--color-sky) 55%, var(--color-mountain)),
@@ -396,8 +474,8 @@ onBeforeUnmount(() => {
     gap: var(--space-12);
   }
 
-  .story__item:nth-child(even) .story__body {
-    margin-left: clamp(0rem, 4vw, 3rem);
+  .story__track {
+    --story-axis-gap: var(--space-10);
   }
 
   .story__continuum {
@@ -411,7 +489,7 @@ onBeforeUnmount(() => {
   .story__continuum-elbow {
     display: block;
     position: absolute;
-    left: 0.85rem;
+    left: var(--story-axis);
     bottom: 28%;
     width: min(11rem, 22vw);
     height: 2px;
@@ -440,6 +518,9 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .story {
+    /* 窄屏收紧轴心与横向间距，避免正文被挤窄 */
+    --story-axis: 0.75rem;
+    --story-axis-gap: var(--space-5);
     padding-block: var(--space-12) 0;
   }
 
@@ -447,21 +528,28 @@ onBeforeUnmount(() => {
     gap: var(--space-8);
   }
 
-  .story__rail,
+  .story__lede,
+  .story__statement {
+    font-size: var(--text-sm);
+  }
+
   .story__continuum-rail {
-    left: 0.7rem;
+    left: var(--story-axis);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .story__rail-progress,
   .story__item,
-  .story__dot {
+  .story__dot,
+  .story__index,
+  .story__item-title,
+  .story__statement {
     transition: none;
   }
 
-  .story__item {
-    opacity: 1;
+  .story__item--active .story__dot {
+    transform: none;
   }
 }
 </style>
