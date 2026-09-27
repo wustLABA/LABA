@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { inject, type Ref } from 'vue'
 
+import StageResources from '../resources/StageResources.vue'
 import { aiStages, type AiStageId } from '../../content/explore-ai'
+import type { LearningResource } from '../../content/resources'
 
 const focusedStage = inject<Ref<AiStageId | null>>('aiFocusedStage')
 const setFocusedStage = inject<(id: AiStageId | null) => void>('setAiFocusedStage')
+/** 见 ResearchStageJournal：null 表示本组件未被页面层接入资料通道 */
+const stageResources = inject<readonly LearningResource[] | null>('aiResources', null)
 </script>
 
 <template>
@@ -32,6 +36,12 @@ const setFocusedStage = inject<(id: AiStageId | null) => void>('setAiFocusedStag
           <dd>{{ facet.body }}</dd>
         </div>
       </dl>
+
+      <StageResources
+        v-if="stageResources"
+        :resources="stageResources"
+        :stage-id="stage.id"
+      />
     </article>
   </div>
 </template>

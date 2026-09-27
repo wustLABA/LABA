@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { inject, type Ref } from 'vue'
 
+import StageResources from '../resources/StageResources.vue'
+import type { LearningResource } from '../../content/resources'
+
 import {
   researchStages,
   type ResearchStageId,
@@ -10,6 +13,15 @@ const activeStage = inject<Ref<ResearchStageId | null>>('researchActiveStage')
 const focusedStage = inject<Ref<ResearchStageId | null>>('researchFocusedStage')
 const setFocusedStage = inject<(id: ResearchStageId | null) => void>(
   'setResearchFocusedStage',
+)
+/**
+ * 由页面层 provide。用 null 作为缺失标记（而不是空数组），
+ * 这样 v-if 能真正区分「没有资料通道」与「有通道但该阶段暂无资料」——
+ * 后者应由 StageResources 内部处理，两种情况的渲染结果不同。
+ */
+const stageResources = inject<readonly LearningResource[] | null>(
+  'researchResources',
+  null,
 )
 
 function isReading(id: ResearchStageId) {
@@ -82,6 +94,12 @@ function isDim(id: ResearchStageId) {
             </li>
           </ul>
         </section>
+
+        <StageResources
+          v-if="stageResources"
+          :resources="stageResources"
+          :stage-id="stage.id"
+        />
       </div>
     </article>
   </div>

@@ -8,6 +8,8 @@ import ResearchLoop from '../components/explore-research/ResearchLoop.vue'
 import ResearchSpine from '../components/explore-research/ResearchSpine.vue'
 import ResearchStageJournal from '../components/explore-research/ResearchStageJournal.vue'
 import PageContainer from '../components/layout/PageContainer.vue'
+import ResourceLibrary from '../components/resources/ResourceLibrary.vue'
+import { deepLearningResources } from '../content/explore-research-resources'
 import {
   researchStages,
   type ResearchStageId,
@@ -23,6 +25,19 @@ function setFocusedStage(id: ResearchStageId | null) {
 provide('researchActiveStage', activeStage)
 provide('researchFocusedStage', focusedStage)
 provide('setResearchFocusedStage', setFocusedStage)
+/**
+ * 把本路径的学习资料通过 provide 下发，供阶段卡片内嵌显示。
+ * 不直接 import 到子组件里，是为了让「资料属于哪个路径」这件事
+ * 只在页面层决定一次，子组件保持与数据来源解耦。
+ */
+provide('researchResources', deepLearningResources)
+
+/** 底部资料库的分组顺序沿用阶段定义，保证与上方叙事一致 */
+const resourceGroups = researchStages.map((stage) => ({
+  id: stage.id,
+  index: stage.index,
+  label: stage.shortLabel,
+}))
 
 let observer: IntersectionObserver | null = null
 
@@ -79,6 +94,13 @@ onBeforeUnmount(() => {
       <ResearchLoop />
       <EvidenceLedger />
       <ResearchCapstone />
+      <ResourceLibrary
+        :resources="deepLearningResources"
+        :groups="resourceGroups"
+        eyebrow="学习资料"
+        title="把阶段落到可读、可跑的材料上。"
+        lede="按阶段分组。PDF 与 PPT 可直接在浏览器打开，视频与外部文章在新标签页进入。标了「必读」的已就近显示在上面各阶段里。"
+      />
     </PageContainer>
   </main>
 </template>
