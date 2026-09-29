@@ -7,17 +7,22 @@ import { communityAsk } from '../../content/community'
 const route = useRoute()
 const host = ref<HTMLElement | null>(null)
 
-/** giscus.app configuration for jolaaa999/LABA */
+/**
+ * giscus.app 配置。
+ *
+ * 仓库账号是 wustLABA；jolaaa999 是改名前的旧用户名，GitHub 重命名后
+ * repo ID（node_id）保持不变，因此 repoId 无需随之更改。
+ */
 const GISCUS = {
-  repo: 'jolaaa999/LABA',
+  repo: 'wustLABA/LABA',
   repoId: 'R_kgDOUeoLpw',
   category: 'Announcements',
   categoryId: 'DIC_kwDOUeoLp84DF2V-',
   mapping: 'pathname',
-  strict: '1',
+  strict: '0',
   reactionsEnabled: '1',
   emitMetadata: '0',
-  inputPosition: 'top',
+  inputPosition: 'bottom',
   theme: 'noborder_light',
   lang: 'zh-CN',
 } as const
@@ -67,7 +72,7 @@ onBeforeUnmount(() => {
   <section class="giscus-board" aria-labelledby="giscus-board-title">
     <header class="giscus-board__header">
       <p class="giscus-board__eyebrow">{{ communityAsk.eyebrow }}</p>
-      <h2 id="giscus-board-title" class="giscus-board__title">{{ communityAsk.title }}</h2>
+      <h1 id="giscus-board-title" class="giscus-board__title">{{ communityAsk.title }}</h1>
       <p class="giscus-board__lede">
         在本页直接留言与回复。使用 GitHub 账号登录（由
         <a href="https://giscus.app" target="_blank" rel="noopener noreferrer">giscus</a>

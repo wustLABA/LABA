@@ -24,7 +24,7 @@ import AuroraButton from '../ui/AuroraButton.vue'
     <div class="community-closing__links">
       <a
         class="community-closing__link"
-        href="https://github.com/jolaaa999/LABA/discussions"
+        href="https://github.com/wustLABA/LABA/discussions"
         target="_blank"
         rel="noopener noreferrer"
       >

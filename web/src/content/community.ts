@@ -128,8 +128,8 @@ export const communityAsk = {
     '在社区页直接留言。用 GitHub 账号登录即可提问与回复；讨论保存在仓库 Discussions。',
   askLabel: '去提问',
   browseLabel: '看全部讨论 ↗',
-  askUrl: 'https://github.com/jolaaa999/LABA/discussions/new?category=q-a',
-  browseUrl: 'https://github.com/jolaaa999/LABA/discussions',
+  askUrl: 'https://github.com/wustLABA/LABA/discussions/new?category=q-a',
+  browseUrl: 'https://github.com/wustLABA/LABA/discussions',
   note: '账号即你的 GitHub。本站通过 giscus 嵌入 Discussions，无需自建登录后端。',
   steps: [
     {
