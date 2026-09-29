@@ -3,10 +3,18 @@
  *
  * 设计约束：
  * - 资料只描述「去哪看什么」，站内不托管课程、不做进度追踪，因此这里
- *   没有 status / progress 字段。文件本体放在 public/resources/ 下，
- *   由浏览器直接打开，不经过前端路由。
+ *   没有 status / progress 字段。
  * - 资料数量会持续增长，所以字段全部可选、可缺省，新增资料时不必填满。
  *   组件也按「缺失即不渲染」处理，避免出现空的元信息占位。
+ *
+ * 关于站内文件：
+ * 目前两条路径的资料**全部是外部权威链接**，没有任何站内文件。早期版本
+ * 用了十几条指向 public/resources/ 的站内链接，但那些 PDF/PPTX 从未上传
+ * （目录里只有 .gitkeep），导致线上每一条点击都 404。
+ *
+ * toAssetPath() 与 pdf / ppt / code / dataset 这几个类型因此暂时没有使用方，
+ * 保留它们是为了以后真要托管站内文件时有现成的落点 —— 那时再把文件放进
+ * public/resources/ 并改用 toAssetPath 生成 href 即可。
  */
 
 export type ResourceKind = 'pdf' | 'ppt' | 'video' | 'link' | 'code' | 'dataset'
@@ -21,7 +29,7 @@ export interface LearningResource {
   /** 说明：为什么值得看。不是内容复述 */
   note: string
   kind: ResourceKind
-  /** 站内文件用站内绝对路径（toAssetPath 生成）；外部资源写完整 URL */
+  /** 外部资源写完整 URL；站内文件用 toAssetPath() 生成（当前无站内文件） */
   href: string
   /**
    * 归属阶段。与各页面自己的 stage id 对应（ResearchStageId / AiStageId）。
@@ -45,6 +53,8 @@ export interface LearningResource {
  *
  * 用 BASE_URL 而不是硬编码 '/resources/...'：base 在 vite.config.ts 中定义，
  * 本地 dev 与生产可能不同，跟随 BASE_URL 可以避免路径写死后线上 404。
+ *
+ * 注意：当前没有任何资料使用它（见文件顶部说明），保留供以后托管站内文件。
  */
 export function toAssetPath(path: string): string {
   const base = import.meta.env.BASE_URL || '/'
