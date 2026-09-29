@@ -69,13 +69,13 @@ watch(
         <div class="projects-archive__heading">
           <p class="projects-archive__eyebrow">作品档案</p>
           <h1 class="projects-archive__title">
-            我们构建、
+            成员构建、
             <span class="projects-archive__title-break">测试并分享的作品。</span>
           </h1>
         </div>
         <div class="projects-archive__aside">
           <p class="projects-archive__lede">
-            由社团内部构建的 AI 工程、Deep Learning 科研与工具。
+            社团成员的个人项目，涵盖 AI 工程、工具与开源插件。
           </p>
           <dl class="projects-archive__stats">
             <div class="projects-archive__stat">

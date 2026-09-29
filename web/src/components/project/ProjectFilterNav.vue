@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 import type { ProjectFilterId } from '../../types/project'
 
-defineProps<{
+const props = defineProps<{
   modelValue: ProjectFilterId
   counts: Record<ProjectFilterId, number>
 }>()
@@ -10,12 +12,23 @@ const emit = defineEmits<{
   'update:modelValue': [value: ProjectFilterId]
 }>()
 
-const filters: { id: ProjectFilterId; label: string }[] = [
+const ALL_FILTERS: { id: ProjectFilterId; label: string }[] = [
   { id: 'all', label: '全部' },
   { id: 'ai-engineering', label: 'AI 工程' },
   { id: 'research', label: '科研' },
   { id: 'tools', label: '工具' },
 ]
+
+/**
+ * 只显示有内容的分类。
+ *
+ * 作品档案目前全部来自成员个人项目，没有科研类条目 —— 若照旧渲染「科研 0」，
+ * 点进去会得到一个空列表，看起来像页面坏了。计数为 0 的分类直接不显示，
+ * 以后补上科研类项目时会自动出现。「全部」始终保留。
+ */
+const filters = computed(() =>
+  ALL_FILTERS.filter((item) => item.id === 'all' || (props.counts[item.id] ?? 0) > 0),
+)
 
 function select(id: ProjectFilterId) {
   emit('update:modelValue', id)

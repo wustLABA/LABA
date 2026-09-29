@@ -15,11 +15,11 @@ const featuredProjects = getFeaturedProjects().slice(0, 3)
       <header class="selected-works__header">
         <div class="selected-works__heading">
           <p class="selected-works__eyebrow">精选作品</p>
-          <h2 class="selected-works__title">我们构建的作品。</h2>
+          <h2 class="selected-works__title">成员构建的作品。</h2>
         </div>
         <div class="selected-works__aside">
           <p class="selected-works__lede">
-            来自 AI 工程实践、深度学习研究与社区协作的精选作品。
+            来自社团成员个人项目的精选：AI 工程、工具与开源插件。
           </p>
           <RouterLink class="selected-works__all" to="/projects">
             全部作品

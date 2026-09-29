@@ -1,10 +1,16 @@
 /**
- * Development placeholder content for Selected Works + Work Archive + Case Study.
- * Replace with real community projects when available.
- * NOT claimed as real club deliverables.
+ * 作品档案 —— 成员个人项目。
  *
- * Placeholder content must be replaced or explicitly gated before public launch.
- * Case study wording for placeholder:true uses intended / planned / illustrative language.
+ * 定位说明（重要）：
+ * 这里的项目来自社团成员的个人 GitHub 仓库，属于**成员个人作品**，
+ * 不是社团的官方交付物。页面文案与详情页均按此表述，避免把个人项目
+ * 说成社团成果。
+ *
+ * 内容来源：以下每个项目的 summary、techStack 与 caseStudy 都依据该仓库
+ * 的真实 README 与仓库元数据撰写，没有虚构的功能、指标或成果。
+ * 仓库里没写的东西就不写 —— 宁可信息少，也不要编。
+ *
+ * 后续补充真实社团项目时，按同样的原则追加即可。
  */
 import type { Project, ProjectCaseStudy } from '../types/project'
 import {
@@ -13,390 +19,436 @@ import {
   type ProjectFilterId,
 } from '../types/project'
 
+/** 成员个人 GitHub 账号。作品档案里的仓库均位于该账号下。 */
+const MEMBER_GITHUB = 'https://github.com/jolaaa999'
+
 const agentCase: ProjectCaseStudy = {
   overview:
-    '校园 Agent 工作坊旨在探索如何把社团活动里的重复协调工作，收敛成可拆解、可调用工具、可回写结果的 Agent 工作流设计。',
+    '基于 AI 智能体的专业图谱生成与个性化学习路径导航。采用 Monorepo 组织前端可视化、Go 网关、Python AI 解析引擎与 Neo4j 数据库四部分。',
   problem:
-    '活动筹备时，任务常分散在聊天与文档里：拆解不清晰、工具调用靠人手、结果难以回写到统一记录——这是本设计要回应的痛点。',
+    '学习资料通常以线性文档组织，难以体现知识之间的依赖关系；想把「一个领域的结构」和「我该按什么顺序学」同时表达清楚，需要图结构而不是列表。',
   approach:
-    '设计主链为 Task → Plan → Tool → Observe → Result，把意图翻译成可执行步骤，并用本地工具桥接减少“只能聊不能办”。',
+    '把图谱构建与路径导航拆成三个独立服务：Python 侧用 LangChain 做实体关系解析，Go 侧做网关与图数据读写，前端用 AntV G6 渲染图谱并做交互式导航。',
   architecture: {
-    summary: '计划中的结构：轻量编排层 + 工具适配层 + 结果回写。',
+    summary: 'Monorepo：前端可视化 + Go 网关 + Python AI 引擎 + Neo4j。',
     nodes: [
-      { id: 'intent', label: '意图', detail: '活动目标与约束' },
-      { id: 'planner', label: '规划器', detail: '步骤拆解与优先级' },
-      { id: 'tools', label: '工具', detail: 'MCP / 本地脚本' },
-      { id: 'memory', label: '记忆', detail: '短时上下文与清单' },
-      { id: 'writeback', label: '回写', detail: '结果归档' },
+      { id: 'frontend', label: '前端', detail: 'Vue3 + TS + Vite + AntV G6' },
+      { id: 'gateway', label: 'Go 网关', detail: 'Gin + Neo4j Driver（DDD 分层）' },
+      { id: 'engine', label: 'AI 引擎', detail: 'FastAPI + LangChain Agent' },
+      { id: 'graph', label: 'Neo4j', detail: 'Docker Compose 一键启动' },
     ],
   },
   workflow: [
     {
-      title: '捕捉意图',
-      detail: '目标：把活动目标写成可检查的任务描述。',
+      title: '解析',
+      detail: 'POST /api/parse —— 调用 DeepSeek 从原始文本抽取实体与关系。',
     },
     {
-      title: '规划步骤',
-      detail: '目标：生成有序步骤，并标注所需工具。',
+      title: '诊断',
+      detail: 'POST /api/langchain/diagnose —— 三 Agent 诊断流水线。',
     },
     {
-      title: '调用工具',
-      detail: '目标：执行文件、通知或清单类动作。',
+      title: '对话',
+      detail: 'POST /api/langchain/chat —— 基于图谱上下文的问答。',
     },
     {
-      title: '观察并回写',
-      detail: '目标：记录结果，回写到共享笔记。',
+      title: '路径',
+      detail: 'POST /api/langchain/learning-path —— 生成个性化学习路径。',
     },
   ],
   results: [
-    {
-      label: '示意性演示路径',
-      detail: '目标演示路径为 Task → Plan → Tool → Result；尚未作为生产系统验证。',
-    },
-    {
-      label: '共享词汇（拟议）',
-      detail: '设计目标：用同一套 Task / Tool / Result 语言讨论 Agent。',
-    },
+    { label: '可运行的多服务架构', detail: '四部分各有独立启动方式，Neo4j 用 docker compose 起。' },
+    { label: '图谱驱动的问答与路径', detail: '对话与学习路径都以上游构建的图谱作为上下文。' },
   ],
   limitations: [
-    '当前为开发占位：无真实线上部署与稳定性数据。',
-    '工具权限与安全边界仍需在实现阶段约束。',
+    '需要自行配置 DeepSeek API Key 与 Neo4j 实例才能完整跑通。',
+    'README 未提供效果评测数据，因此这里也不给出任何准确率或性能结论。',
   ],
   artifacts: [
-    { label: '设计笔记', kind: 'notes', note: '仅作示意' },
-    { label: '代码仓库', kind: 'repo', note: '未发布' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/AGENT` },
   ],
-  collaborators: [{ name: '开发占位', role: '工程' }],
   nextSteps: [
-    '若进入实现：补齐评测用例与失败回放。',
-    '收敛工具白名单与权限模型。',
+    '补充图谱质量与路径推荐的评测方式。',
+    '简化本地启动流程，降低部署门槛。',
   ],
 }
 
-const researchCase: ProjectCaseStudy = {
+const crawlerCase: ProjectCaseStudy = {
   overview:
-    '注意力消融实验台规划用对照实验整理 Transformer attention 的复现与消融记录，强调可复查的配置与失败样本归档方式。',
-  question:
-    '在固定数据与训练预算下，不同 attention 变体对稳定性与指标曲线的影响是什么？哪些失败模式可能重复出现？',
-  approach:
-    '计划统一复现脚本、对照配置表与日志约定；每次消融只改一个关键因子，并把失败样本单独归档。',
-  experiment: {
-    summary: '计划中的小规模对照消融框架，优先可复查而非刷榜。',
-    setup: '计划固定随机种子、数据切分与训练步数，并记录配置哈希。',
-    metrics: ['验证损失', '注意力熵（近似）', '失败率'],
-    controls: ['基线注意力', '被消融的头 / 模式'],
-  },
-  observations: [
-    '观察消融是否影响早期训练稳定性，以及是否需要更长 warmup。',
-    '检查失败样本是否更常出现在长序列或边缘类别。',
-    '检查日志命名一致性是否影响对照可读性。',
-  ],
-  results: [
-    {
-      label: '配置台账',
-      detail: '预期产物：可对照的实验配置记录结构。',
-    },
-    {
-      label: '失败案例索引',
-      detail: '预期产物：结构化的失败样本复查索引。',
-    },
-  ],
-  limitations: [
-    '尚未执行真实实验；不可外推为模型结论。',
-    '占位内容，非已发表论文结果。',
-  ],
-  artifacts: [
-    { label: '实验笔记', kind: 'notes', note: '示意性提纲' },
-    { label: '配置模板', kind: 'other', note: '仅设计' },
-  ],
-  collaborators: [{ name: '开发占位', role: '科研' }],
-  nextSteps: [
-    '有真实跑数后再补对照维度与可视化。',
-    '把失败样本分类写成短文（若实验执行）。',
-  ],
-}
-
-const toolCase: ProjectCaseStudy = {
-  overview:
-    '论文流水线 CLI 计划把论文阅读、复现清单与实验记录串成命令行流水线，减少文档在协作中的漂移。',
+    '面向公版书与开放获取（Open Access）资源的图书抓取与本地 RAG 语料构建工具。核心代码零第三方依赖，仅用 Python 标准库即可运行。',
   problem:
-    '笔记、清单与实验日志分散在不同文件与约定里，交接时容易丢步骤、丢版本。',
+    '想用合法来源的电子书搭建本地语料，需要跨多个站点搜索、判断授权、下载、清洗分片并建索引 —— 每一步都有踩坑空间，尤其是授权判断。',
   approach:
-    '设计统一命令入口管理 parse → checklist → log 三个阶段，并约定最小元数据字段。',
+    '把「合规」写进代码而不是靠自觉：下载前必须通过 rights 校验，只有检测到 public domain / open access / creative commons / cc by / cc0 之一才放行；来源发现阶段先读 robots.txt，命中 Disallow 就停止自动适配；遇到人机校验或限速明确失败，不做绕过。',
+  workflow: [
+    { title: '多源搜索', detail: '插件式 Source 抽象，统一输出 BookResult 并跨源去重排序。' },
+    { title: '权利校验', detail: '下载前检查页面许可文本，不命中白名单则拒绝。' },
+    { title: '下载与探测', detail: '按 HEAD / Range 探测真实格式（txt / epub / pdf / mobi / html）。' },
+    { title: '清洗分片', detail: '切分后建 TF-IDF 索引；装 sentence-transformers 可切稠密向量。' },
+    { title: '检索问答', detail: '在本地索引上直接问答。' },
+  ],
+  results: [
+    { label: '纯标准库的 RAG 流水线', detail: '不依赖第三方包即可完成抓取到问答的全流程。' },
+    { label: '70 个测试用例', detail: '含 10 类网络链路回归场景（重定向循环、Cookie、SSRF、挑战页、限速等）。' },
+    { label: 'SSRF 防护', detail: 'validate_public_http_url() 会拒绝 localhost、.local 与私有网段。' },
+  ],
+  limitations: [
+    'arXiv 单篇授权不统一，其检索 API 不返回许可证字段，无法做白名单过滤；项目对它的处理是如实标注「授权随条目而异」并给出条目页链接，由使用者自行核对。',
+    '自动发现只产出候选配置，一律以 enabled: false 落盘，必须人工复核后才可能启用。',
+  ],
+  artifacts: [
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/legal_book_crawler` },
+  ],
+  nextSteps: [
+    '扩充声明式来源的覆盖范围，减少手写适配器。',
+    '为稠密向量检索补充评测。',
+  ],
+}
+
+const sectionNavCase: ProjectCaseStudy = {
+  overview:
+    'DeepSeek Harness 插件：在对话正文旁提供章节导航栏，并把章节书签保存在浏览器本地。是 Section-Nav-for-ChatGPT 的 DSH 移植版。',
+  problem:
+    '长回答滚动之后很难快速回到某个小节，浏览器自带的查找也无法体现回答的结构。',
+  approach:
+    '把 ChatGPT 扩展的适配层替换为 DSH 适配器与 dsh bundle manifest，保留原有的阅读位置跟踪与迟滞（hysteresis）行为，避免滚动时选中项频繁跳动。',
+  workflow: [
+    { title: '章节提取', detail: '解析当前回答中的标题，渲染为紧凑的侧边导航栏。' },
+    { title: '位置跟踪', detail: '按阅读线高亮当前小节，带迟滞以避免抖动。' },
+    { title: '点击跳转', detail: '点击标题滚动到对应位置并短暂高亮目标。' },
+    { title: '本地书签', detail: '可收藏任意章节，之后从书签抽屉跳回。' },
+  ],
+  results: [
+    { label: '常驻导航栏', detail: '不会收缩成标记条，标题始终可见，宽度随窗口变化。' },
+    { label: '悬停卡片', detail: '显示该轮的用户提问与最终回答的两行摘录。' },
+  ],
+  limitations: [
+    '依赖 DSH 的插件接口，宿主版本变化时可能需要同步适配。',
+    '移植自第三方 MIT 项目，授权与出处见仓库 NOTICE 与 LICENSE。',
+  ],
+  artifacts: [
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/dsh-section-nav` },
+  ],
+  nextSteps: ['跟进上游 Section-Nav-for-ChatGPT 的功能更新。'],
+}
+
+const autoupdateCase: ProjectCaseStudy = {
+  overview:
+    'DSH 插件：为本地 deepseek-harness 检出提供安全自动更新的状态面板与手动触发入口。',
+  problem:
+    '本地克隆的 harness 需要跟进上游更新，但直接重新克隆或覆盖文件可能冲掉本地改动。',
+  approach:
+    '更新动作交给独立的 PowerShell 脚本 tools/sync-dsh.ps1 执行安全模式 git merge（fast-forward 或 merge commit，绝不使用文件复制或重新克隆），插件只负责把它接进 DSH Web UI。',
+  workflow: [
+    { title: '检查', detail: '设置 → 通用 中的「自动更新」面板显示状态、上次检查时间与落后提交数。' },
+    { title: '触发', detail: '一键「立即检查更新」执行同步脚本。' },
+    { title: '查看', detail: '独立状态页 /dsh-autoupdate 展示详情、被阻塞文件与错误信息，60 秒自动刷新。' },
+  ],
+  results: [
+    { label: '并发锁', detail: '已有同步在跑时，第二次调用立即退出。' },
+    { label: '冲突保护', detail: '本地未提交改动与上游文件重叠时中止，工作区保持原样（退出码 3）。' },
+    { label: '失败可回滚', detail: '真实冲突走 git merge --abort 恢复到合并前状态；其他失败返回退出码 2 且不产生改动。' },
+    { label: '不会拖垮 DSH', detail: '报告缺失或损坏时插件优雅降级，不会影响 DSH 启动。' },
+  ],
+  limitations: [
+    '仅适用于本地 git 检出的 harness，不适用于发行版安装。',
+    '同步脚本为 Windows PowerShell 实现。',
+  ],
+  artifacts: [
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/dsh-autoupdate` },
+  ],
+  nextSteps: ['补充非 Windows 平台的同步实现。'],
+}
+
+const botCase: ProjectCaseStudy = {
+  overview:
+    '基于 NapCat（OneBot v11）+ NoneBot2 的 QQ 群聊机器人。人设是热情可爱的深度学习学姐：群内 @ 必回，未被 @ 时低频率自然插嘴。',
+  problem:
+    '课程群里的常见提问高度重复，而纯检索式机器人回答生硬、不会把握插话时机。',
+  approach:
+    '用 NapCat 接入 QQ，反向 WebSocket 转发到 NoneBot2，由 dl_senpai 插件组装上下文后调用自己配置的 OpenAI 兼容中转站。插嘴行为用概率与冷却时间控制，避免打扰群聊。',
   architecture: {
-    summary: '计划实现：CLI 编排 + Markdown 约定 + 本地文件存储。',
+    summary: 'QQ 群 → NapCat → 反向 WebSocket → NoneBot2 → dl_senpai → 中转站模型。',
     nodes: [
-      { id: 'parse', label: '解析', detail: '论文笔记结构化' },
-      { id: 'checklist', label: '清单', detail: '复现清单' },
-      { id: 'runlog', label: '运行日志', detail: '实验记录' },
-      { id: 'export', label: '导出', detail: '汇总输出' },
+      { id: 'qq', label: 'QQ 群', detail: '消息来源' },
+      { id: 'napcat', label: 'NapCat', detail: 'OneBot v11 实现' },
+      { id: 'nonebot', label: 'NoneBot2', detail: '反向 WebSocket 接入' },
+      { id: 'plugin', label: 'dl_senpai', detail: '人设与对话逻辑' },
+      { id: 'llm', label: '中转站', detail: 'OpenAI 兼容接口' },
     ],
   },
   workflow: [
-    { title: '读入笔记', detail: '目标：从 Markdown 读取基础字段。' },
-    { title: '生成清单', detail: '目标：生成可勾选复现项。' },
-    { title: '追加运行日志', detail: '目标：写入一次实验摘要。' },
-    { title: '导出汇总', detail: '目标：输出可读汇总。' },
-  ],
-  usage: [
-    {
-      title: '初始化工作区',
-      detail: '拟定命令：paper pipeline init — 建立目录约定。',
-    },
-    {
-      title: '运行阶段',
-      detail: '拟定命令：paper pipeline run --from notes — 执行流水线。',
-    },
-    {
-      title: '导出',
-      detail: '拟定命令：paper pipeline export — 生成汇总。',
-    },
+    { title: '@ 必回', detail: '被 @ 时必定响应。' },
+    { title: '自然插嘴', detail: '未被 @ 时按概率插话，默认 0.03，冷却 180 秒。' },
+    { title: '热梗注入', detail: '可选注入近期热梗备忘（默认开启）。' },
+    { title: '按需联网', detail: '可选联网检索，支持 auto / bing / duckduckgo / searxng / tavily。' },
   ],
   results: [
-    {
-      label: 'CLI 形态（拟议）',
-      detail: '设计目标：命令与目录约定可被其他工具型项目参考。',
-    },
-    {
-      label: '拟定状态：已共享',
-      detail: '分发模型设想为社团内部示例；并非已发布生产软件。',
-    },
+    { label: '可配置的群白名单', detail: '支持限定生效群号，空值表示全部群生效。' },
+    { label: '签到与私聊', detail: '含签到功能（默认白名单群）与私聊响应开关。' },
   ],
   limitations: [
-    '尚未形成可发布实现；无远程协作与权限系统。',
-    '解析规则仍属设计假设，依赖笔记格式约定。',
+    '需要自备 QQ 机器人账号、NapCat 部署与中转站 API Key。',
+    'README 未给出对话质量评测数据，因此这里不提供任何效果指标。',
   ],
   artifacts: [
-    { label: 'CLI 草图', kind: 'repo', note: '未发布' },
-    { label: '使用说明', kind: 'notes', note: '示意' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/miao-senpai` },
   ],
-  collaborators: [{ name: '开发占位', role: '工具' }],
-  nextSteps: [
-    '增强解析容错与 schema 校验（实现阶段）。',
-    '补一小套示例论文笔记。',
+  nextSteps: ['补充人设一致性的评测方式。'],
+}
+
+const tankCase: ProjectCaseStudy = {
+  overview:
+    '原版「坦克动荡」风格的浏览器坦克对战，支持远程联机。客户端部署在 Vercel，权威游戏房间跑在 Fly.io。',
+  problem:
+    '想和朋友远程对战，但房间状态需要服务端权威与固定 tick；静态托管平台无法满足长连接与定时的要求。',
+  approach:
+    '前后端分离：Client 用 Phaser 3 + Vite + TypeScript 部署到 Vercel，Server 用 Colyseus 0.15 + Node 22 部署到 Fly.io，共享层放确定性迷宫与物理仿真代码，保证两端行为一致。',
+  architecture: {
+    summary: '静态前端 + 权威游戏服，分层部署。',
+    nodes: [
+      { id: 'client', label: 'Client', detail: 'Phaser 3 + Vite + TS（Vercel）' },
+      { id: 'server', label: 'Server', detail: 'Colyseus 0.15 + Node 22（Fly.io）' },
+      { id: 'shared', label: 'Shared', detail: '确定性迷宫 / 物理仿真' },
+    ],
+  },
+  workflow: [
+    { title: '开始', detail: '击杀对手得 1 分，进入下一小局（新迷宫 + 乱序出生点）。' },
+    { title: '获胜', detail: '先到 5 分获胜（GAME.scoreToWin 可改）。' },
+    { title: '技能', detail: '场上彩色方块为可拾取技能，A–Z 共 26 种，各有加强版。' },
+    { title: '联机', detail: '打开 https://tank-trouble-ten.vercel.app/?ws=wss://tanktrouble-server.fly.dev 后创建或加入房间。' },
   ],
+  results: [
+    { label: '可用的正式联机方案', detail: '游戏服 wss://tanktrouble-server.fly.dev，并提供 /health 健康检查。' },
+    { label: '临时的本机隧道方案', detail: '本机开服 + cloudflared 隧道，用于正式服务不可用时的替代。' },
+    { label: '文档站', detail: 'https://tank-trouble-ten.vercel.app/docs/，改功能时同步更新。' },
+  ],
+  limitations: [
+    '静态托管的页面里 localhost 指向访问者自己的电脑，因此联机必须显式传入 ws 参数或配置环境变量。',
+    '远程对战依赖已部署的 Fly.io 服务，服务下线则联机不可用。',
+  ],
+  artifacts: [
+    { label: '在线试玩', kind: 'demo', href: 'https://tank-trouble-ten.vercel.app' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/TankTrouble` },
+  ],
+  nextSteps: ['补充房间列表与观战功能。'],
+}
+
+const tfmyCase: ProjectCaseStudy = {
+  overview:
+    '「塔菲喵译」—— 把文字转成塔菲语录形式的加密/解密玩具工具，纯前端实现。',
+  problem:
+    '一个轻量的趣味编码需求：把任意文字映射成一组固定语录，且必须能无损还原。',
+  approach:
+    '把明文按 UTF-8 转成二进制，再用字典把 1 / 0 / 字符间隔分别映射为三段塔菲语录，得到密文；解密即反向映射回二进制再还原 UTF-8。',
+  workflow: [
+    { title: '编码', detail: '明文 → UTF-8 → 二进制 → 字典映射 → 密文。' },
+    { title: '解码', detail: '密文 → 语录识别 → 二进制 → UTF-8 → 明文。' },
+  ],
+  results: [
+    { label: '纯前端零后端', detail: 'Vue 3 Composition API + Vite + TailwindCSS，无需服务端。' },
+    { label: '可还原', detail: '用三种固定语录承载 0 / 1 / 间隔，信息不丢失。' },
+  ],
+  limitations: [
+    '这是趣味工具，不是密码学意义上的加密 —— 映射规则公开，不具备保密性。',
+  ],
+  artifacts: [
+    { label: '在线试玩', kind: 'demo', href: 'https://tfmy.vercel.app' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/tfmy` },
+  ],
+  nextSteps: ['支持自定义语录字典。'],
+}
+
+const deliciousCase: ProjectCaseStudy = {
+  overview:
+    '「人间烟火」—— 用于记录自己做的菜的软件。支持百科搜索菜谱、新增自己的菜品（材料、重量、过程）、给自己的菜品评分，以及在修改时与历史版本对比。',
+  problem:
+    '家常菜的做法往往散落在聊天记录和备忘录里，改了几次之后很难回忆「上一次是怎么做的、这次改了哪里」。',
+  approach:
+    '把每道菜当作带版本的记录来管理：新增与修改都保留历史，便于逐版对比；同时接入百科菜谱搜索，用于把自己的做法与通用做法对照。',
+  workflow: [
+    { title: '记录', detail: '新增菜品：材料、重量、制作过程。' },
+    { title: '评分', detail: '给自己的菜品打分并留评价。' },
+    { title: '对比', detail: '修改后与历史版本对比，或与百科菜谱对比。' },
+  ],
+  results: [
+    { label: '版本化记录', detail: '每次修改都可与历史版本对照，看得出改了什么。' },
+    { label: '已部署', detail: 'https://delicious-bay.vercel.app' },
+  ],
+  limitations: [
+    'README 未说明数据存储与多用户方案，因此这里不做推断。',
+  ],
+  artifacts: [
+    { label: '在线试用', kind: 'demo', href: 'https://delicious-bay.vercel.app' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/Delicious` },
+  ],
+  nextSteps: ['补充数据导出，避免记录被锁定在单一平台。'],
+}
+
+const blogCase: ProjectCaseStudy = {
+  overview:
+    '26 届团长的个人博客。个人站点 monorepo，前后端与内容分别组织，用于沉淀技术笔记与项目记录。',
+  problem:
+    '技术笔记散落在各类平台，格式与检索方式不统一，也不便长期保存。',
+  approach:
+    '用 monorepo 把站点各部分组成放在同一仓库内统一管理，内容以 Markdown 维护。',
+  workflow: [
+    { title: '安装', detail: 'npm run install:frontend' },
+    { title: '开发', detail: 'npm run dev' },
+  ],
+  results: [
+    { label: '已上线', detail: 'https://jol-ten.vercel.app' },
+  ],
+  limitations: [
+    'README 目前只包含最基本的启动说明，仓库结构细节见其 docs/ 目录。',
+  ],
+  artifacts: [
+    { label: '访问博客', kind: 'demo', href: 'https://jol-ten.vercel.app' },
+    { label: '代码仓库', kind: 'repo', href: `${MEMBER_GITHUB}/jol` },
+  ],
+  collaborators: [{ name: '26 届团长', role: '作者' }],
+  nextSteps: ['补充写作与发布的文档。'],
 }
 
 export const projects: Project[] = [
   {
-    slug: 'campus-agent-workshop',
-    title: '校园 Agent 工作坊',
+    slug: 'agent-graph-navigation',
+    title: 'AGENT · 图谱提取与导航',
     category: 'ai-engineering',
     summary:
-      '一个面向社团活动的 Agent 工作流设计：从任务拆解到工具调用与结果回写，探索把“能聊”变成“能办”。',
+      '基于 AI 智能体的专业图谱生成与个性化学习路径导航。Monorepo 组织前端可视化、Go 网关、Python AI 解析引擎与 Neo4j。',
     year: '2026',
     status: '进行中',
-    techStack: ['Vue', 'TypeScript', 'Agent', 'MCP'],
+    techStack: ['Vue3', 'TypeScript', 'Go', 'Python', 'LangChain', 'Neo4j'],
     featured: true,
     featuredRank: 1,
     visualKind: 'agent',
-    placeholder: true,
+    githubUrl: `${MEMBER_GITHUB}/AGENT`,
     caseStudy: agentCase,
   },
   {
-    slug: 'attention-ablation-lab',
-    title: '注意力消融实验台',
-    category: 'research',
+    slug: 'legal-book-crawler',
+    title: '公版书抓取与本地 RAG 语料',
+    category: 'ai-engineering',
     summary:
-      '围绕 Transformer attention 的复现与消融实验规划：对照配置、指标曲线与失败样本归档方式。',
-    year: '2025',
+      '面向公版书与开放获取资源的抓取与本地 RAG 语料构建工具。核心代码零第三方依赖，仅用 Python 标准库即可运行。',
+    year: '2026',
     status: '进行中',
-    techStack: ['PyTorch', 'Transformer', 'CV', 'Experiment'],
+    techStack: ['Python', 'RAG', 'TF-IDF', '爬虫', '合规校验'],
     featured: true,
     featuredRank: 2,
-    visualKind: 'research',
-    placeholder: true,
-    caseStudy: researchCase,
+    visualKind: 'agent',
+    githubUrl: `${MEMBER_GITHUB}/legal_book_crawler`,
+    caseStudy: crawlerCase,
   },
   {
-    slug: 'paper-pipeline-cli',
-    title: '论文流水线 CLI',
+    slug: 'tank-trouble-online',
+    title: '坦克动荡 · 远程联机',
     category: 'developer-tool',
     summary:
-      '计划把论文阅读、复现清单与实验记录串成命令行流水线，减少科研协作里的文档漂移。',
-    year: '2025',
-    status: '已共享',
-    techStack: ['Go', 'CLI', 'Markdown', 'Workflow'],
+      '原版「坦克动荡」风格的浏览器坦克对战 + 远程联机。Phaser 3 前端部署在 Vercel，Colyseus 权威房间部署在 Fly.io。',
+    year: '2026',
+    status: '已部署',
+    techStack: ['Phaser 3', 'TypeScript', 'Colyseus', 'Node', 'Vite'],
     featured: true,
     featuredRank: 3,
     visualKind: 'tool',
-    placeholder: true,
-    caseStudy: toolCase,
+    githubUrl: `${MEMBER_GITHUB}/TankTrouble`,
+    demoUrl: 'https://tank-trouble-ten.vercel.app',
+    caseStudy: tankCase,
   },
   {
-    slug: 'rag-lab-notes',
-    title: 'RAG 实验笔记',
+    slug: 'miao-senpai-bot',
+    title: '喵学姐 · QQ 群机器人',
     category: 'ai-engineering',
     summary:
-      '检索增强问答的实验笔记框架：规划 chunk 策略、评测集与失败案例归档方式。',
-    year: '2025',
+      '基于 NapCat + NoneBot2 的 QQ 群聊机器人（深度学习学姐人设）。@ 必回，未被 @ 时低频率自然插嘴。',
+    year: '2026',
     status: '已共享',
-    techStack: ['Python', 'Embedding', 'RAG', 'Eval'],
+    techStack: ['Python', 'NoneBot2', 'NapCat', 'OneBot v11', 'LLM'],
     featured: false,
     featuredRank: 4,
     visualKind: 'agent',
-    placeholder: true,
-    caseStudy: {
-      overview:
-        '规划记录 RAG 实验中的 chunk、检索与评测选择，把失败案例整理成可复用笔记结构。',
-      problem: '策略常散落在个人笔记，新人难以复现同一评测口径。',
-      approach: '计划固定评测集，对照 chunk / top-k / rerank 组合并归档失败问答。',
-      workflow: [
-        { title: '构建评测集', detail: '目标：标注一组可复查问答。' },
-        { title: '遍历策略', detail: '目标：对照 chunk 与检索参数。' },
-        { title: '归档失败样本', detail: '目标：失败样本分类入库。' },
-      ],
-      results: [
-        {
-          label: '可复用笔记（目标）',
-          detail: '设计目标：形成可引用的策略备忘结构；尚未验证采用效果。',
-        },
-      ],
-      limitations: ['未接生产检索服务；无真实评测跑数。'],
-      artifacts: [{ label: '实验笔记', kind: 'notes', note: '示意' }],
-      nextSteps: ['若实现：补自动评测脚本。'],
-    },
+    githubUrl: `${MEMBER_GITHUB}/miao-senpai`,
+    caseStudy: botCase,
   },
   {
-    slug: 'vision-baseline-kit',
-    title: '视觉基线套件',
-    category: 'research',
+    slug: 'delicious-recipe-journal',
+    title: '人间烟火 · 菜品记录',
+    category: 'developer-tool',
     summary:
-      '轻量视觉基线脚手架规划：固定数据切分、训练日志与对比表，降低入门复现摩擦。',
-    year: '2025',
-    status: '进行中',
-    techStack: ['PyTorch', 'CV', 'Hydra', 'Logging'],
+      '记录自己做的菜的软件：百科菜谱搜索、新增菜品（材料/重量/过程）、自我评分，以及与历史版本对比。',
+    year: '2026',
+    status: '已部署',
+    techStack: ['Go', 'Web'],
     featured: false,
     featuredRank: 5,
-    visualKind: 'research',
-    placeholder: true,
-    caseStudy: {
-      overview: '规划为视觉入门复现提供固定切分与日志约定的基线脚手架。',
-      question: '如何让新人在最短路径上跑通可对照的视觉基线？',
-      approach: '计划模板化配置、日志与对比表，减少环境差异。',
-      experiment: {
-        summary: '计划中的标准分类基线模板。',
-        setup: '计划固定 split 与 seed。',
-        metrics: ['准确率', '训练耗时'],
-      },
-      observations: [
-        '检查统一日志字段后，对照成本是否下降。',
-      ],
-      results: [
-        {
-          label: '入门套件（拟议）',
-          detail: '预期产物：可用于 workshop 演示的模板结构。',
-        },
-      ],
-      limitations: ['覆盖任务面窄；尚无真实训练产物。'],
-      artifacts: [{ label: '套件笔记', kind: 'notes', note: '示意' }],
-      nextSteps: ['加更多 backbone 模板（实现阶段）。'],
-    },
+    visualKind: 'tool',
+    githubUrl: `${MEMBER_GITHUB}/Delicious`,
+    demoUrl: 'https://delicious-bay.vercel.app',
+    caseStudy: deliciousCase,
   },
   {
-    slug: 'mcp-toolbench',
-    title: 'MCP 工具台',
+    slug: 'dsh-section-nav',
+    title: 'DSH 章节导航插件',
     category: 'open-source',
     summary:
-      '一组面向本地开发的 MCP 工具样例规划：文件、终端与笔记桥接，方便 Agent 实验接线。',
+      'DeepSeek Harness 插件：为对话正文提供章节导航栏与本地书签。Section-Nav-for-ChatGPT 的 DSH 移植版。',
     year: '2026',
     status: '已共享',
-    techStack: ['TypeScript', 'MCP', 'Node', 'CLI'],
+    techStack: ['TypeScript', 'DSH Plugin', 'Vue'],
     featured: false,
     featuredRank: 6,
     visualKind: 'tool',
-    placeholder: true,
-    caseStudy: {
-      overview: '规划提供本地 MCP 工具样例，方便 Agent 实验快速接线。',
-      problem: '每次实验都要从零写工具适配，启动成本高。',
-      approach: '计划沉淀文件 / 终端 / 笔记三类最小工具。',
-      usage: [
-        { title: '本地安装', detail: '拟定：在开发机挂载样例 server。' },
-        { title: '调用工具', detail: '拟定：从 Agent 侧调用白名单工具。' },
-      ],
-      architecture: {
-        summary: '计划中的 MCP server 样例集合。',
-        nodes: [
-          { id: 'fs', label: '文件系统' },
-          { id: 'shell', label: '终端' },
-          { id: 'notes', label: '笔记' },
-        ],
-      },
-      results: [
-        {
-          label: '拟定状态：已共享',
-          detail: '分发模型设想为学习 / 演示样例；非生产加固发布。',
-        },
-      ],
-      limitations: ['权限模型仅为设计假设。'],
-      artifacts: [{ label: '工具台', kind: 'repo', note: '未发布' }],
-      nextSteps: ['补安全沙箱说明。'],
-    },
+    githubUrl: `${MEMBER_GITHUB}/dsh-section-nav`,
+    caseStudy: sectionNavCase,
   },
   {
-    slug: 'club-ops-assistant',
-    title: '社团运营助手',
-    category: 'ai-engineering',
+    slug: 'dsh-autoupdate',
+    title: 'DSH 安全自动更新插件',
+    category: 'open-source',
     summary:
-      '社团运营助手原型规划：活动通知草稿、清单生成与周报摘要，探索 AI × 生产力落地路径。',
+      '为本地 deepseek-harness 检出提供安全自动更新的状态面板与手动触发。同步走 git merge，绝不覆盖或重新克隆。',
     year: '2026',
-    status: '草稿',
-    techStack: ['LLM', 'Prompt', 'Notion', 'Automation'],
+    status: '已共享',
+    techStack: ['JavaScript', 'DSH Plugin', 'PowerShell', 'Git'],
     featured: false,
     featuredRank: 7,
-    visualKind: 'agent',
-    placeholder: true,
-    caseStudy: {
-      overview: '计划验证运营场景下的提示词与草稿生成，是否能减少重复文书。',
-      problem: '通知、清单与周报格式重复，占用组织时间。',
-      approach: '设计模板化提示 + 人工审阅后发布的流程。',
-      workflow: [
-        { title: '收集输入', detail: '目标：收集活动要点与时间。' },
-        { title: '起草', detail: '目标：生成通知 / 清单草稿。' },
-        { title: '复核', detail: '目标：人工修订后发出。' },
-      ],
-      results: [
-        {
-          label: '草稿原型（拟议）',
-          detail: '目标状态为可内部试用的草稿助手；尚未正式上线。',
-        },
-      ],
-      limitations: ['依赖人工终审；无真实使用数据。'],
-      nextSteps: ['沉淀常用模板库。'],
-    },
+    visualKind: 'tool',
+    githubUrl: `${MEMBER_GITHUB}/dsh-autoupdate`,
+    caseStudy: autoupdateCase,
   },
   {
-    slug: 'hackathon-starter-pack',
-    title: '黑客松起步包',
-    category: 'competition',
+    slug: 'tfmy-cipher',
+    title: '塔菲喵译',
+    category: 'developer-tool',
     summary:
-      '面向短期黑客松的脚手架说明与模板索引（开发占位）：目录约定、提交清单与演示脚本。',
-    year: '2024',
-    status: '归档',
-    techStack: ['Template', 'Docs', 'Demo'],
+      '把文字按 UTF-8 → 二进制 → 语录字典映射成塔菲语录的加密/解密工具，纯前端实现。',
+    year: '2026',
+    status: '已部署',
+    techStack: ['Vue 3', 'Vite', 'TailwindCSS'],
     featured: false,
     featuredRank: 8,
     visualKind: 'tool',
-    placeholder: true,
-    caseStudy: {
-      overview: '规划为短期黑客松提供目录、提交与演示约定的起步包说明。',
-      problem: '临时组队时结构混乱，演示前才发现缺材料。',
-      approach: '用清单与模板约束最小交付物。',
-      workflow: [
-        { title: '初始化', detail: '目标：复制目录约定。' },
-        { title: '填写清单', detail: '目标：对照提交项。' },
-        { title: '演示脚本', detail: '目标：准备演示路径。' },
-      ],
-      results: [
-        {
-          label: '起步包提纲（示意）',
-          detail: '当前为占位材料结构，待真实赛事资料替换。',
-        },
-      ],
-      limitations: ['非特定赛事官方材料。'],
-      artifacts: [{ label: '起步文档', kind: 'notes', note: '示意' }],
-      nextSteps: ['按真实赛事更新清单。'],
-    },
+    githubUrl: `${MEMBER_GITHUB}/tfmy`,
+    demoUrl: 'https://tfmy.vercel.app',
+    caseStudy: tfmyCase,
+  },
+  {
+    slug: 'jol-personal-site',
+    title: '个人博客',
+    category: 'developer-tool',
+    summary:
+      '26 届团长的个人博客：个人站点 monorepo，用于沉淀技术笔记与项目记录。',
+    year: '2026',
+    status: '已上线',
+    techStack: ['Vue', 'Monorepo', 'Markdown'],
+    featured: false,
+    featuredRank: 9,
+    visualKind: 'tool',
+    githubUrl: `${MEMBER_GITHUB}/jol`,
+    demoUrl: 'https://jol-ten.vercel.app',
+    caseStudy: blogCase,
   },
 ]
 
