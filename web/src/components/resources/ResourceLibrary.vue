@@ -99,7 +99,7 @@ const total = computed(() => props.resources.length)
   color: var(--color-text);
   /* 26ch 比 EvidenceLedger 的 18ch 宽：本标题是完整句子而非短语，
      过窄会让它在「而不是」处硬断，读起来割裂 */
-  max-width: 26ch;
+  max-width: var(--measure-hero-wide);
 }
 
 .resource-library__lede {

@@ -52,7 +52,7 @@ const emit = defineEmits<{
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .events-hero__lede {
@@ -71,7 +71,7 @@ const emit = defineEmits<{
   }
 
   .events-hero__title {
-    max-width: 16ch;
+    max-width: var(--measure-hero);
   }
 }
 </style>

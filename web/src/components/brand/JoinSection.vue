@@ -203,7 +203,7 @@ useIntersectionObserver(
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .join__copy {

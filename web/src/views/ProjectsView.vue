@@ -197,7 +197,7 @@ watch(
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 12ch;
+  max-width: var(--measure-hero);
 }
 
 .projects-archive__title-break {

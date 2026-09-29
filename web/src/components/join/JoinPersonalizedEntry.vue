@@ -145,7 +145,7 @@ const titleLines = computed(() =>
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 22ch;
+  max-width: var(--measure-title-wide);
 }
 
 .personalized__title-line {

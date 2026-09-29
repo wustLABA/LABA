@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .giscus-board__lede,

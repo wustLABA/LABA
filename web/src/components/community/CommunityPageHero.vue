@@ -51,7 +51,7 @@ defineProps<{
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 12ch;
+  max-width: var(--measure-hero);
 }
 
 .community-hero__lede {
@@ -78,7 +78,7 @@ defineProps<{
   }
 
   .community-hero__title {
-    max-width: 14ch;
+    max-width: var(--measure-hero);
   }
 }
 </style>

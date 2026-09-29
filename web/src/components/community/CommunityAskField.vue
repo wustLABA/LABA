@@ -76,7 +76,7 @@ import AuroraButton from '../ui/AuroraButton.vue'
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 14ch;
+  max-width: var(--measure-title);
 }
 
 .ask-field__lede {
@@ -129,7 +129,7 @@ import AuroraButton from '../ui/AuroraButton.vue'
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
   color: var(--color-text-secondary);
-  max-width: 42ch;
+  max-width: var(--measure-lede);
 }
 
 .ask-field__actions {
@@ -166,7 +166,7 @@ import AuroraButton from '../ui/AuroraButton.vue'
   font-size: var(--text-xs);
   line-height: var(--leading-relaxed);
   color: var(--color-text-muted);
-  max-width: 44ch;
+  max-width: var(--measure-lede);
 }
 
 @media (max-width: 720px) {

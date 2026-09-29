@@ -203,7 +203,7 @@ onBeforeUnmount(() => {
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 16ch;
+  max-width: var(--measure-title);
 }
 
 .what-happens__lede {

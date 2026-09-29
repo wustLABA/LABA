@@ -53,7 +53,7 @@ const ledeBlocks = joinHero.lede.split('\n\n')
 
 .join-hero__title-line {
   display: block;
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .join-hero__lede {

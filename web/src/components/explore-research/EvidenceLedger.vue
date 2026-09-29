@@ -49,7 +49,7 @@ import { evidenceLedger } from '../../content/explore-research'
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 18ch;
+  max-width: var(--measure-title);
 }
 
 .evidence-ledger__lede {

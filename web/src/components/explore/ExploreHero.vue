@@ -123,7 +123,7 @@ function focus(path: ExplorePathId | null) {
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 12ch;
+  max-width: var(--measure-hero);
 }
 
 .explore-hero__lede {

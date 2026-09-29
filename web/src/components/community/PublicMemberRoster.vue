@@ -70,7 +70,7 @@ const isEmpty = computed(() => members.length === 0)
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 18ch;
+  max-width: var(--measure-title);
 }
 
 .public-roster__body {

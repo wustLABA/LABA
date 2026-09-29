@@ -53,7 +53,7 @@ import { learningPrinciples } from '../../content/explore'
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 22ch;
+  max-width: var(--measure-title-wide);
 }
 
 .learning-principles__lede {

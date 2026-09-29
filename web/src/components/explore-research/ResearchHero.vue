@@ -217,7 +217,7 @@ function setFocus(node: typeof focusNode.value) {
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 18ch;
+  max-width: var(--measure-title);
 }
 
 .research-hero__lede {

@@ -56,7 +56,7 @@ import AuroraButton from '../ui/AuroraButton.vue'
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 18ch;
+  max-width: var(--measure-title);
 }
 
 .about-closing__lede {

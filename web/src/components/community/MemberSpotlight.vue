@@ -179,7 +179,7 @@ defineProps<{
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   color: var(--color-text-secondary);
-  max-width: 36ch;
+  max-width: var(--measure-lede);
 }
 
 .member-spotlight__skills {

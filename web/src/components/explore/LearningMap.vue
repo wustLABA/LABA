@@ -132,7 +132,7 @@ const understand = explorePaths[1]
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--color-text);
-  max-width: 22ch;
+  max-width: var(--measure-title-wide);
 }
 
 .learning-map__lede {

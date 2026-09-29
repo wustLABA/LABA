@@ -50,7 +50,7 @@ import { researchCapstone } from '../../content/explore-research'
   letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
   color: var(--color-text);
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .research-capstone__lede,

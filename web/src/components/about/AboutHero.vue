@@ -50,7 +50,7 @@ const titleLines = aboutHero.title.split('\n')
 
 .about-hero__title-line {
   display: block;
-  max-width: 14ch;
+  max-width: var(--measure-hero);
 }
 
 .about-hero__lede {
