@@ -1,48 +1,56 @@
 # 学习资料目录
 
-本站两条学习路径的资料文件放在这里。
+**当前状态：这两个目录是空的（只有 `.gitkeep`）。两条学习路径的资料全部是外部链接。**
 
-- `research/` —— 深度学习 / 科研路径（对应 `web/src/content/explore-research-resources.ts`）
-- `ai/` —— AI 工程路径（对应 `web/src/content/explore-ai-resources.ts`）
+## 为什么是空的
 
-## 命名约定
+早期版本在这里规划了站内托管的 PDF / PPTX / PY 资料，并在
+`explore-ai-resources.ts` / `explore-research-resources.ts` 里写了十几条
+`toAssetPath('resources/...')` 形式的链接 —— 但文件从未真正上传。
 
+结果是线上每一条点击都 404：目录里只有 `.gitkeep`，链接指向的文件不存在。
+
+现在改为**全部使用外部权威链接**（PyTorch、D2L、CS231n、Stanford、Anthropic、
+arXiv 等）。这样内容更权威，也不会因为缺少文件而失效。
+
+## 新增一份资料
+
+**优先选外部链接。** 在对应的 `*-resources.ts` 里补一条：
+
+```ts
+{
+  id: 'foundations-pytorch-basics',
+  stageId: 'foundations',
+  title: 'PyTorch 官方教程：60 分钟入门',
+  note: '从张量到训练循环的最短路径。照着敲一遍，先建立「一次完整训练长什么样」的直觉。',
+  kind: 'link',
+  href: 'https://pytorch.org/tutorials/beginner/deep_learning_60min_blitz.html',
+  source: 'PyTorch 官方',
+  level: '入门',
+  duration: '约 60 分钟',
+  mustRead: true,
+  external: true,
+}
 ```
-<阶段 id>-<主题 slug>.<扩展名>
-```
 
-例：`research/foundations-numpy-notes.pdf`、`ai/agent-systems-memory-patterns.pptx`
+要点：
 
-阶段 id 必须与内容文件里的 `stageId` 一致，这样从文件名就能看出归属，
-排查「某个阶段怎么没资料」时不用翻代码。
+1. `stageId` 必须与对应内容文件里的阶段 id 一致，否则资料不会出现在阶段卡片里。
+2. 想让它在阶段卡片里就近显示，加 `mustRead: true`（每个阶段最多显示 3 条）。
+3. **外部链接必须加 `external: true`**，组件据此决定用新标签页打开。
+4. 加进去之前先点一下确认可访问 —— 外链会随上游改版失效，建议定期抽查。
 
-## 新增一份资料的步骤
+## 如果要托管站内文件
 
-1. 把文件放进对应路径的阶段目录下，按上面的约定命名。
-2. 在对应的 `*-resources.ts` 里补一条记录：
+需要同时满足两个条件，缺一不可，否则就会重演上面的 404：
 
-   ```ts
-   {
-     id: 'foundations-numpy-notes',
-     stageId: 'foundations',
-     title: 'NumPy 速查笔记',
-     note: '写训练循环时最常踩的广播、shape、dtype 三类问题，一页讲清。',
-     kind: 'pdf',
-     href: toAssetPath('resources/research/foundations-numpy-notes.pdf'),
-     source: 'LABA 整理',
-     level: '入门',
-     duration: '约 15 分钟',
-   }
-   ```
+1. **文件真的放进目录**（`research/` 或 `ai/`），命名约定
+   `<阶段 id>-<主题 slug>.<扩展名>`，例如
+   `research/foundations-numpy-notes.pdf`。
+2. `href` 用 `toAssetPath('resources/research/...')` 生成，**不要手写
+   `/resources/...`** —— 该函数跟随 Vite 的 `base` 拼接，写死路径在 base
+   变化时同样会在线上 404。
 
-3. 想让它在阶段卡片里就近显示，加 `mustRead: true`（每个阶段最多显示 3 条）。
-
-`href` 一律用 `toAssetPath()` 生成，不要手写 `/resources/...`：
-该函数跟随 Vite 的 `base` 拼接路径，写死路径在 base 变化时会在线上 404。
-
-## 注意
-
-- 这两个目录里的文件会随站点一起发布，并且**永久留在 git 历史里**。
-  单个文件建议控制在 20 MB 以内；更大的资料改用外链（`kind: 'link'`）。
-- PPT/PPTX 无法在浏览器内预览，点击会触发下载。若希望在线阅读，
-  建议同时导出 PDF 版本，把 `href` 指向 PDF。
+注意站内文件会随站点发布并**永久留在 git 历史里**：单个文件建议控制在
+20 MB 以内，更大的资料改用外链。PPT/PPTX 无法在浏览器内预览，点击会触发
+下载；若希望在线阅读，建议同时导出 PDF 版本并把 `href` 指向 PDF。
